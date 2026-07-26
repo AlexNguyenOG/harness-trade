@@ -99,3 +99,18 @@
 - If you were invoked with a work order: the order's file lists, validation
   commands, and `.factory/PITFALLS.md` are binding. Git is read-only for
   delegates — never commit, push, stash, reset, or clean.
+
+## Cursor Cloud specific instructions
+
+- Package manager is `bun` (pinned to 1.3.0). The startup update script runs
+  `bun install --frozen-lockfile`; `bun` is on `PATH` (symlinked into
+  `/usr/local/bin`), so no profile sourcing is needed to invoke it.
+- Standard commands are in `README.md` / root `package.json`: `bun run dev`
+  (dev server), `bun run lint`, `bun run test` (root = typecheck + `packages/ui`
+  drift test), `bun run build`. Portal-only unit tests: `cd apps/portal && bun test`.
+- Dev server binds `http://localhost:3000` (SvelteKit/Vite). The terminal UI —
+  the primary surface to smoke-test — is at `http://localhost:3000/terminal`.
+- The app boots with zero env vars using public read-only market data (proxied
+  through the Vite dev proxies in `apps/portal/vite.config.ts`). Wallet/auth is
+  gated: without `PUBLIC_PRIVY_APP_ID` the header shows an "Auth unavailable"
+  state — this is expected, not a failure.
