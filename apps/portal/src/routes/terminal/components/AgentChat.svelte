@@ -200,9 +200,6 @@
         <span class="tag durable">
           DURABLE{pendingRequests.length ? ` · ${pendingRequests.length}` : ""}
         </span>
-        {#if accountMode === "live" && $privyAuth.authenticated}
-          <span class="tag signing">LIVE · SERVER WALLET</span>
-        {/if}
         {#if $agentState.paused}
           <span class="tag pause" title="Money-PAUSE engaged">PAUSE</span>
         {/if}
@@ -467,11 +464,6 @@
 
   .tag.durable {
     color: var(--up);
-  }
-
-  .tag.signing {
-    color: var(--up);
-    border-color: color-mix(in srgb, var(--up) 55%, var(--line-soft));
   }
 
   .picker {
