@@ -155,8 +155,8 @@ describe("dock + drawer prefs", () => {
     expect(parsePrefs(JSON.stringify({ dockTab: "journal" })).dockTab).toBe(
       "journal",
     );
-    expect(parsePrefs(JSON.stringify({ dockTab: "desk" })).dockTab).toBe(
-      "desk",
+    expect(parsePrefs(JSON.stringify({ dockTab: "positions" })).dockTab).toBe(
+      "positions",
     );
     expect(parsePrefs(JSON.stringify({ dockTab: "watch" })).dockTab).toBe(
       "watch",
@@ -164,6 +164,12 @@ describe("dock + drawer prefs", () => {
     expect(
       parsePrefs(JSON.stringify({ dockTab: "settings" })).dockTab,
     ).toBeUndefined();
+  });
+
+  test("dockTab migrates legacy desk → positions", () => {
+    expect(parsePrefs(JSON.stringify({ dockTab: "desk" })).dockTab).toBe(
+      "positions",
+    );
   });
 
   test("macroOpen accepts booleans only", () => {
