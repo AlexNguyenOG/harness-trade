@@ -13,8 +13,7 @@ import { getPrivyAccessToken } from "./privy-auth";
 const CHAT_OPEN_KEY = "harness.chat.v1";
 const CHAT_ENDPOINT = "/api/chat";
 const UNGROUNDED_FALLBACK = "I can't ground that answer in the data I have.";
-const UNAVAILABLE_FALLBACK =
-  "Desk model unavailable — try again in a moment.";
+const UNAVAILABLE_FALLBACK = "Desk model unavailable — try again in a moment.";
 const NO_ACTION_FALLBACK =
   "No trade action was queued. Try: long SOL $50 @ 3x market.";
 
