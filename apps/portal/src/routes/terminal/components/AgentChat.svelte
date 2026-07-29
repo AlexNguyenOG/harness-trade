@@ -305,14 +305,15 @@
   }
 
   .layout-dock {
-    /* Full height under the topbar (not under market rail) so backtick
-       open is a Cursor-style split: terminal compresses, agent fills the
-       right column edge-to-edge. Width from --agent-dock-w on the shell. */
+    /* Full height under the topbar and above the fixed status line so the
+       composer is never clipped by the bottom nav. */
     position: fixed;
     right: 0;
     top: var(--topbar-h, 3rem);
     width: var(--agent-dock-w, min(42vw, 28rem));
-    height: calc(100dvh - var(--topbar-h, 3rem));
+    height: calc(
+      100dvh - var(--topbar-h, 3rem) - var(--status-h, 1.9rem)
+    );
     border-left: 1px solid var(--line);
     z-index: 25;
   }
@@ -749,14 +750,15 @@
 
   @media (max-width: 1100px) {
     .layout-dock {
-      /* Narrow viewports: agent is a full-height sheet under topbar
-         (terminal still uses responsive single-column under it via scroll). */
+      /* Narrow: full-width sheet under topbar, still above status line. */
       position: fixed;
       right: 0;
       left: 0;
       top: var(--topbar-h, 3rem);
       width: auto;
-      height: calc(100dvh - var(--topbar-h, 3rem));
+      height: calc(
+        100dvh - var(--topbar-h, 3rem) - var(--status-h, 1.9rem)
+      );
       z-index: 30;
       border-left: none;
     }

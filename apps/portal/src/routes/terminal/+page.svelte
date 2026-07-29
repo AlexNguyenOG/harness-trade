@@ -6195,7 +6195,7 @@
 <main
   class="terminal-shell"
   class:chat-open={chatOpen}
-  style={`--topbar-h: ${topbarHeight || 48}px; --agent-dock-w: min(42vw, 28rem);`}
+  style={`--topbar-h: ${topbarHeight || 48}px; --status-h: 1.9rem;${chatOpen ? " --agent-dock-w: min(42vw, 28rem);" : ""}`}
 >
   <a class="skip-link" href="#terminal-content">Skip to terminal content</a>
 

@@ -170,6 +170,9 @@
   .status-line {
     position: fixed;
     inset: auto 0 0 0;
+    /* Stop under the agent dock when open so the line doesn't cover the
+       composer (shell sets --agent-dock-w only while chat-open). */
+    right: var(--agent-dock-w, 0px);
     z-index: 30;
     display: flex;
     align-items: center;
