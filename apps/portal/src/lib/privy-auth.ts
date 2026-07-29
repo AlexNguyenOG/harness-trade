@@ -54,6 +54,20 @@ export const privyAuth = writable<PrivyAuthState>({
   otpSentTo: null,
 });
 
+export type ServerSignerState = {
+  configured: boolean;
+  enabled: boolean;
+  busy: boolean;
+  error: string | null;
+};
+
+export const serverSigner = writable<ServerSignerState>({
+  configured: Boolean(readServerSignerConfig().signerId),
+  enabled: false,
+  busy: false,
+  error: null,
+});
+
 let client: PrivyClient | null = null;
 let initializePromise: Promise<void> | null = null;
 let sdkPromise: Promise<PrivySdkModule> | null = null;
@@ -142,6 +156,12 @@ export async function logoutPrivy(): Promise<void> {
     error: null,
     otpSentTo: null,
   }));
+  serverSigner.set({
+    configured: Boolean(readServerSignerConfig().signerId),
+    enabled: false,
+    busy: false,
+    error: null,
+  });
 }
 
 export async function getPrivyAccessToken(): Promise<string | null> {
@@ -149,6 +169,79 @@ export async function getPrivyAccessToken(): Promise<string | null> {
   const token = await privy.getAccessToken();
   privyAuth.update((state) => ({ ...state, accessToken: token }));
   return token;
+}
+
+/**
+ * Explicitly grant the server key quorum transaction access to the signed-in
+ * embedded Solana wallet. Unified wallets use session signers; legacy wallets
+ * use Privy's delegated-wallet path.
+ */
+export async function enableServerAgentSigning(): Promise<void> {
+  const privy = await requirePrivyClient();
+  const account = currentSolanaAccount();
+  if (!account) throw new Error("solana-wallet-not-found");
+  const config = readServerSignerConfig();
+  if (!config.signerId) throw new Error("server-signer-not-configured");
+  serverSigner.update((state) => ({ ...state, busy: true, error: null }));
+  try {
+    const sdk = await loadPrivySdk();
+    const response =
+      typeof account.id === "string" && account.id
+        ? await sdk.addSessionSigners({
+            client: privy,
+            wallet: account as never,
+            signers: [
+              {
+                signer_id: config.signerId,
+                override_policy_ids: config.policyIds,
+              },
+            ],
+          })
+        : await sdk.delegatedActions.delegateWallet(privy)({
+            address: String(account.address ?? ""),
+            chainType: "solana",
+          });
+    await setAuthenticatedUser(response.user as unknown as PrivyUser, {
+      walletStatus: "ready",
+      walletError: null,
+    });
+  } catch (error) {
+    serverSigner.update((state) => ({
+      ...state,
+      busy: false,
+      error: errorMessage(error),
+    }));
+    throw error;
+  }
+}
+
+/** Revoke the server agent's signing authority for the current wallet. */
+export async function revokeServerAgentSigning(): Promise<void> {
+  const privy = await requirePrivyClient();
+  const account = currentSolanaAccount();
+  if (!account) throw new Error("solana-wallet-not-found");
+  serverSigner.update((state) => ({ ...state, busy: true, error: null }));
+  try {
+    const sdk = await loadPrivySdk();
+    const response =
+      typeof account.id === "string" && account.id
+        ? await sdk.removeSessionSigners({
+            client: privy,
+            wallet: account as never,
+          })
+        : await sdk.delegatedActions.revokeWallets(privy)();
+    await setAuthenticatedUser(response.user as unknown as PrivyUser, {
+      walletStatus: "ready",
+      walletError: null,
+    });
+  } catch (error) {
+    serverSigner.update((state) => ({
+      ...state,
+      busy: false,
+      error: errorMessage(error),
+    }));
+    throw error;
+  }
 }
 
 // Sign + send a Solana transaction with the embedded wallet. Signing happens
@@ -393,6 +486,7 @@ async function setAuthenticatedUser(
     error: null,
     otpSentTo: null,
   }));
+  syncServerSignerState(user);
 }
 
 function mountSecureContext(privy: PrivyClient): void {
@@ -517,6 +611,55 @@ function readLinkedAccounts(user: PrivyUser): Record<string, unknown>[] {
   const raw = user.linked_accounts ?? user.linkedAccounts;
   if (!Array.isArray(raw)) return [];
   return raw.filter(isRecord);
+}
+
+function readServerSignerConfig(): {
+  signerId: string;
+  policyIds: string[];
+} {
+  const env = import.meta.env as Record<string, string | undefined>;
+  const signerId = cleanEnv(env.PUBLIC_PRIVY_SIGNER_ID);
+  const policyIds = cleanEnv(env.PUBLIC_PRIVY_POLICY_IDS)
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return { signerId, policyIds };
+}
+
+function syncServerSignerState(user: PrivyUser | null): void {
+  const config = readServerSignerConfig();
+  const account = user
+    ? readLinkedAccounts(user).find((candidate) => {
+        const chain = String(
+          candidate.chain_type ??
+            candidate.chainType ??
+            candidate.chain ??
+            "",
+        ).toLowerCase();
+        return chain === "solana";
+      })
+    : null;
+  const signers =
+    account && Array.isArray(account.additional_signers)
+      ? account.additional_signers.filter(isRecord)
+      : [];
+  const sessionSignerEnabled =
+    Boolean(config.signerId) &&
+    signers.some(
+      (signer) =>
+        String(signer.signer_id ?? signer.signerId ?? "") === config.signerId,
+    );
+  const legacyDelegated =
+    Boolean(account) &&
+    !Array.isArray(account?.additional_signers) &&
+    typeof account?.id === "string" &&
+    Boolean(account.id);
+  serverSigner.set({
+    configured: Boolean(config.signerId),
+    enabled: sessionSignerEnabled || legacyDelegated,
+    busy: false,
+    error: null,
+  });
 }
 
 function normalizeEmail(value: unknown): string | null {

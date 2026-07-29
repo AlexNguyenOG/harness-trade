@@ -3,13 +3,15 @@
   import "../terminal.css";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
+  import { page } from "$app/state";
   import AgentChat from "../components/AgentChat.svelte";
-  import {
-    buildPaperDeskContext,
-    registerPaperAgentHost,
-  } from "$lib/agent/paper-host";
+  import { buildPaperDeskContext } from "$lib/agent/paper-host";
   import { chatState } from "$lib/chat";
   import { initializePrivyAuth, privyAuth } from "$lib/privy-auth";
+
+  const accountMode = $derived(
+    page.url.searchParams.get("account") === "live" ? "live" : "paper",
+  );
 
   // Keep dock closed while on full page — one surface.
   $effect(() => {
@@ -20,8 +22,6 @@
 
   onMount(() => {
     void initializePrivyAuth();
-    const stop = registerPaperAgentHost();
-    return () => stop();
   });
 
   function requestAuth(): void {
@@ -50,7 +50,7 @@
     <AgentChat
       buildContext={buildPaperDeskContext}
       onRequestAuth={requestAuth}
-      accountMode="paper"
+      {accountMode}
       layout="page"
     />
   </main>

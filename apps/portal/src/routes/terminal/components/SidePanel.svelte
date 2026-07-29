@@ -14,7 +14,7 @@
   } = $props();
 
   function expand(): void {
-    void goto("/terminal/agent");
+    void goto(`/terminal/agent?account=${accountMode}`);
   }
 </script>
 

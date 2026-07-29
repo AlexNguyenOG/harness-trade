@@ -1,4 +1,5 @@
 import { sveltekit } from "@sveltejs/kit/vite";
+import { eveSvelteKit } from "eve/sveltekit";
 import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
@@ -10,7 +11,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     envPrefix: ["VITE_", "PUBLIC_", "NEXT_PUBLIC_"],
-    plugins: [sveltekit()],
+    plugins: [eveSvelteKit(), sveltekit()],
     ssr: { noExternal: ["@harness-trade/ui"] },
     server: {
       proxy: {

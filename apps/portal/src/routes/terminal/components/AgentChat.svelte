@@ -1,23 +1,20 @@
 <script lang="ts">
-  // Shared agent chat surface — dock (Cursor side) or full page (pre-v3 Chat).
+  import { browser } from "$app/environment";
   import {
-    chatState,
-    closeChat,
-    sendChatMessage,
-    setModelChoice,
-  } from "$lib/chat";
-  import { PRO_LABEL, type ChatModelChoice } from "$lib/chat-models";
+    useEveAgent,
+    type EveDynamicToolPart,
+    type EveMessagePart,
+  } from "eve/svelte";
+  import { closeChat } from "$lib/chat";
   import { AGENT_MODE_LABEL, type AgentMode } from "$lib/agent/modes";
+  import { agentState, getAgentPolicy, setAgentMode, setAgentPaused } from "$lib/agent/state";
   import {
-    acceptAllPending,
-    acceptProposal,
-    rejectProposal,
-  } from "$lib/agent/runtime";
-  import {
-    agentState,
-    setAgentMode,
-    setAgentPaused,
-  } from "$lib/agent/state";
+    enableServerAgentSigning,
+    getPrivyAccessToken,
+    privyAuth,
+    revokeServerAgentSigning,
+    serverSigner,
+  } from "$lib/privy-auth";
 
   let {
     buildContext,
@@ -38,56 +35,167 @@
   let draft = $state("");
   let scrollEl: HTMLDivElement | null = $state(null);
   let inputEl: HTMLTextAreaElement | null = $state(null);
+  let signerNotice = $state<string | null>(null);
 
-  const modelChoices: { value: ChatModelChoice; label: string }[] = [
-    { value: "auto", label: "Auto" },
-    { value: "free", label: "Free" },
-    { value: "pro", label: "Pro" },
-  ];
   const agentModes: AgentMode[] = ["observe", "ask", "auto"];
+  const SESSION_KEY = "harness.eve.session.v1";
+  const EVENTS_KEY = "harness.eve.events.v1";
 
-  const pendingAsk = $derived(
-    $agentState.proposals.filter(
-      (proposal) =>
-        proposal.status === "pending" && proposal.verdict.decision === "ask",
-    ),
-  );
+  function readSaved(key: string): unknown {
+    if (!browser) return undefined;
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
-  const activeProposals = $derived(
-    $agentState.proposals.filter(
-      (proposal) =>
-        proposal.status === "pending" ||
-        proposal.status === "running" ||
-        proposal.status === "failed" ||
-        proposal.status === "done" ||
-        proposal.status === "skipped" ||
-        proposal.status === "rejected",
+  const eve = useEveAgent({
+    initialSession: readSaved(SESSION_KEY) as never,
+    initialEvents: readSaved(EVENTS_KEY) as never,
+    headers: async () => {
+      const token = await getPrivyAccessToken();
+      const policy = getAgentPolicy();
+      return {
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        "x-harness-agent-mode": policy.mode,
+        "x-harness-agent-paused": String(policy.paused),
+        "x-harness-account-mode": accountMode,
+      };
+    },
+  });
+
+  const busy = $derived(eve.status === "submitted" || eve.status === "streaming");
+  const pendingRequests = $derived(
+    eve.data.messages.flatMap((message) =>
+      message.parts
+        .filter(isDynamicToolPart)
+        .map((part) => part.toolMetadata?.eve?.inputRequest)
+        .filter((request) => request !== undefined),
     ),
   );
 
   $effect(() => {
     if (!scrollEl) return;
-    void $chatState.messages.length;
-    void $chatState.phase;
-    void $agentState.proposals.length;
+    void eve.data.messages.length;
+    void eve.status;
     scrollEl.scrollTop = scrollEl.scrollHeight;
+  });
+
+  $effect(() => {
+    if (!browser) return;
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(eve.session));
+      localStorage.setItem(EVENTS_KEY, JSON.stringify(eve.events));
+    } catch {
+      // A private browser or exhausted quota should not break the session.
+    }
   });
 
   function submit(event: SubmitEvent): void {
     event.preventDefault();
-    const text = draft;
+    const text = draft.trim();
+    if (!text || busy) return;
     draft = "";
-    void sendChatMessage(text, buildContext(), { accountMode });
+    void eve.send({ message: text, clientContext: buildContext() });
     inputEl?.focus();
   }
 
   function onKeydown(event: KeyboardEvent): void {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if ($chatState.phase === "waiting" || draft.trim().length === 0) return;
-      const text = draft;
+      const text = draft.trim();
+      if (busy || !text) return;
       draft = "";
-      void sendChatMessage(text, buildContext(), { accountMode });
+      void eve.send({ message: text, clientContext: buildContext() });
+    }
+  }
+
+  function isDynamicToolPart(part: EveMessagePart): part is EveDynamicToolPart {
+    return part.type === "dynamic-tool";
+  }
+
+  function partText(part: EveMessagePart): string {
+    if (part.type === "text") return part.text;
+    return "";
+  }
+
+  function toolLabel(part: EveDynamicToolPart): string {
+    return String(part.toolName ?? "server action").replaceAll("_", " ");
+  }
+
+  function toolStatus(part: EveDynamicToolPart): string {
+    return String(part.state ?? "running").replaceAll("-", " ");
+  }
+
+  function toolSummary(part: EveDynamicToolPart): string {
+    const output = part.output;
+    if (
+      typeof output === "object" &&
+      output !== null &&
+      "summary" in output
+    ) {
+      return String((output as Record<string, unknown>).summary);
+    }
+    if (part.errorText) return part.errorText;
+    const input = part.input;
+    if (typeof input === "object" && input !== null) {
+      const row = input as Record<string, unknown>;
+      return [row.operation, row.symbol, row.sizeUsd ? `$${row.sizeUsd}` : null]
+        .filter(Boolean)
+        .join(" · ");
+    }
+    return "";
+  }
+
+  function toolLinks(
+    part: EveDynamicToolPart,
+  ): { label: string; href: string }[] {
+    const output = part.output;
+    if (typeof output !== "object" || output === null) return [];
+    const urls = (output as Record<string, unknown>).explorerUrls;
+    if (!Array.isArray(urls)) return [];
+    return urls
+      .filter((url): url is string => typeof url === "string")
+      .map((href, index) => ({
+        label: urls.length > 1 ? `View transaction ${index + 1}` : "View transaction",
+        href,
+      }));
+  }
+
+  async function answer(requestId: string, approved: boolean): Promise<void> {
+    await eve.send({
+      inputResponses: [
+        { requestId, optionId: approved ? "approve" : "deny" },
+      ],
+    });
+  }
+
+  function answerPart(part: EveDynamicToolPart, approved: boolean): void {
+    const request = part.toolMetadata?.eve?.inputRequest;
+    if (request) void answer(request.requestId, approved);
+  }
+
+  async function setSigning(enabled: boolean): Promise<void> {
+    signerNotice = null;
+    try {
+      if (enabled) await enableServerAgentSigning();
+      else await revokeServerAgentSigning();
+      signerNotice = enabled
+        ? "Server signing enabled. You can revoke it at any time."
+        : "Server signing revoked.";
+    } catch (error) {
+      signerNotice =
+        error instanceof Error ? error.message : "server-signer-error";
+    }
+  }
+
+  function resetSession(): void {
+    eve.reset();
+    if (browser) {
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(EVENTS_KEY);
     }
   }
 
@@ -107,7 +215,13 @@
   <header class="agent-head">
     <div class="agent-head-left">
       <div class="agent-title-row">
-        <span class="agent-title">Agent</span>
+        <span class="agent-title">EVE Agent</span>
+        <span class="tag durable">
+          DURABLE{pendingRequests.length ? ` · ${pendingRequests.length}` : ""}
+        </span>
+        {#if accountMode === "live" && $serverSigner.enabled}
+          <span class="tag signing">LIVE · SIGNING</span>
+        {/if}
         {#if $agentState.paused}
           <span class="tag pause" title="Money-PAUSE engaged">PAUSE</span>
         {/if}
@@ -135,18 +249,6 @@
       </div>
     </div>
     <div class="agent-head-right">
-      <div class="picker model" role="radiogroup" aria-label="Chat model">
-        {#each modelChoices as choice (choice.value)}
-          <button
-            class:active={$chatState.modelChoice === choice.value}
-            type="button"
-            aria-pressed={$chatState.modelChoice === choice.value}
-            onclick={() => setModelChoice(choice.value)}
-          >
-            {choice.label}
-          </button>
-        {/each}
-      </div>
       <button
         class="ghost"
         class:pause-on={$agentState.paused}
@@ -155,6 +257,20 @@
         onclick={() => setAgentPaused(!$agentState.paused)}
       >
         {$agentState.paused ? "Resume" : "Pause"}
+      </button>
+      {#if accountMode === "live" && $serverSigner.enabled}
+        <button
+          class="ghost revoke"
+          type="button"
+          disabled={$serverSigner.busy}
+          onclick={() => void setSigning(false)}
+          title="Revoke persistent server signing"
+        >
+          Revoke
+        </button>
+      {/if}
+      <button class="ghost" type="button" onclick={resetSession} title="New durable session">
+        New
       </button>
       {#if layout === "dock" && onExpand}
         <button class="ghost" type="button" onclick={onExpand} title="Full page">
@@ -167,110 +283,127 @@
     </div>
   </header>
 
-  {#if pendingAsk.length > 0}
-    <div class="agent-banner">
-      <span>{pendingAsk.length} action(s) need approval</span>
+  {#if accountMode === "live" && $privyAuth.authenticated && !$serverSigner.enabled}
+    <div class="signer-bar">
+      <div>
+        <strong>Enable persistent server signing</strong>
+        <span>
+          Explicit one-time wallet grant. Private keys never leave Privy.
+        </span>
+      </div>
       <button
-        class="secondary"
+        class="primary"
         type="button"
-        onclick={() => void acceptAllPending(accountMode)}
+        disabled={$serverSigner.busy || !$serverSigner.configured}
+        onclick={() => void setSigning(true)}
       >
-        Accept all
+        {$serverSigner.busy ? "Working…" : "Enable"}
       </button>
     </div>
+    {#if signerNotice || $serverSigner.error}
+      <p class="signer-notice">{signerNotice ?? $serverSigner.error}</p>
+    {/if}
   {/if}
 
   <div class="agent-scroll" bind:this={scrollEl}>
     <div class="agent-thread">
-      {#if $chatState.messages.length === 0 && $chatState.phase === "idle" && activeProposals.length === 0}
+      {#if eve.data.messages.length === 0 && eve.status === "ready"}
         <div class="agent-empty">
-          <h2>Chat with the desk</h2>
+          <h2>Your persistent trading agent</h2>
           <p>
             {$agentState.mode === "auto"
-              ? "Auto mode — allowed trades run immediately."
+              ? "Auto mode — server-approved trades continue durably."
               : $agentState.mode === "observe"
                 ? "Observe — research only, no orders."
-                : "Ask mode — review each money action before it runs."}
+                : "Ask mode — every transaction waits for your approval."}
           </p>
           <ul>
             <li>long SOL $50 @ 3x market</li>
-            <li>what’s my paper book?</li>
+            <li>show my live positions and open orders</li>
             <li>move stop to break-even on SOL</li>
           </ul>
         </div>
       {/if}
 
-      {#each $chatState.messages as message, index (index)}
+      {#each eve.data.messages as message, index (index)}
         <div class="msg {message.role}">
-          {#if message.role === "assistant" && message.proLabel}
-            <span class="pro-tag">{PRO_LABEL}</span>
-          {/if}
-          {message.content}
+          {#each message.parts as part}
+            {#if part.type === "text" && partText(part)}
+              <span>{partText(part)}</span>
+            {:else if isDynamicToolPart(part)}
+              <div
+                class="proposal"
+                class:ask={Boolean(part.toolMetadata?.eve?.inputRequest)}
+                class:done={toolStatus(part).includes("output")}
+                class:failed={toolStatus(part).includes("error") || toolStatus(part).includes("denied")}
+                class:running={toolStatus(part).includes("input") || toolStatus(part).includes("running")}
+              >
+                <div class="proposal-head">
+                  <span>SERVER</span>
+                  <span>{toolStatus(part)}</span>
+                </div>
+                <p class="proposal-summary">{toolLabel(part)}</p>
+                {#if toolSummary(part)}
+                  <p class="proposal-reason">{toolSummary(part)}</p>
+                {/if}
+                {#each toolLinks(part) as link}
+                  <a
+                    class="tx-link"
+                    href={link.href}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {link.label} ↗
+                  </a>
+                {/each}
+                {#if part.toolMetadata?.eve?.inputRequest}
+                  <div class="proposal-actions">
+                    <button
+                      class="primary"
+                      type="button"
+                      onclick={() => answerPart(part, true)}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      class="ghost"
+                      type="button"
+                      onclick={() => answerPart(part, false)}
+                    >
+                      Deny
+                    </button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          {/each}
         </div>
       {/each}
 
-      {#each activeProposals as proposal (proposal.id)}
-        <div
-          class="proposal"
-          class:ask={proposal.verdict.decision === "ask"}
-          class:done={proposal.status === "done"}
-          class:failed={proposal.status === "failed" ||
-            proposal.status === "skipped"}
-          class:running={proposal.status === "running"}
-        >
-          <div class="proposal-head">
-            <span>{proposal.risk}</span>
-            <span>{proposal.status}</span>
-          </div>
-          <p class="proposal-summary">{proposal.summary}</p>
-          <p class="proposal-reason">{proposal.verdict.reason}</p>
-          {#if proposal.error}
-            <p class="proposal-error">{proposal.error}</p>
-          {/if}
-          {#if proposal.status === "pending" && proposal.verdict.decision === "ask"}
-            <div class="proposal-actions">
-              <button
-                class="primary"
-                type="button"
-                onclick={() => void acceptProposal(proposal.id, accountMode)}
-              >
-                Accept
-              </button>
-              <button
-                class="ghost"
-                type="button"
-                onclick={() => void rejectProposal(proposal.id, accountMode)}
-              >
-                Reject
-              </button>
-            </div>
-          {/if}
-        </div>
-      {/each}
-
-      {#if $chatState.phase === "waiting"}
+      {#if busy}
         <div class="skeleton" aria-hidden="true">
           <i></i>
           <i></i>
         </div>
       {/if}
 
-      {#if $chatState.phase === "auth"}
+      {#if !$privyAuth.authenticated}
         <div class="state">
           <p>Sign in to talk to the agent.</p>
           <button class="primary" type="button" onclick={onRequestAuth}>
             Sign in
           </button>
         </div>
-      {:else if $chatState.phase === "limit"}
-        <p class="state">Daily limit reached — resets at UTC midnight.</p>
-      {:else if $chatState.phase === "error"}
-        <p class="state error">{$chatState.error ?? "chat-error"}</p>
+      {:else if eve.status === "error"}
+        <p class="state error">{eve.error?.message ?? "agent-transport-error"}</p>
       {/if}
     </div>
   </div>
 
   <form class="composer" onsubmit={submit}>
+    {#if $agentState.paused}
+      <p class="money-paused">Money actions paused · research remains available</p>
+    {/if}
     <label class="sr-only" for="agent-input">Message the agent</label>
     <textarea
       id="agent-input"
@@ -279,7 +412,7 @@
       bind:value={draft}
       rows={layout === "page" ? 3 : 2}
       placeholder="e.g. long SOL $50 @ 3x market…"
-      disabled={$chatState.phase === "waiting"}
+      disabled={busy || !$privyAuth.authenticated}
       onkeydown={onKeydown}
     ></textarea>
     <div class="composer-bar">
@@ -287,7 +420,7 @@
       <button
         class="secondary"
         type="submit"
-        disabled={$chatState.phase === "waiting" || draft.trim().length === 0}
+        disabled={busy || !$privyAuth.authenticated || draft.trim().length === 0}
       >
         Send
       </button>
@@ -383,6 +516,15 @@
     color: var(--amber);
   }
 
+  .tag.durable {
+    color: var(--up);
+  }
+
+  .tag.signing {
+    color: var(--up);
+    border-color: color-mix(in srgb, var(--up) 55%, var(--line-soft));
+  }
+
   .picker {
     display: inline-flex;
     flex: 0 0 auto;
@@ -448,6 +590,11 @@
     color: var(--red);
   }
 
+  .ghost.revoke {
+    min-width: 3.6rem;
+    color: var(--faint);
+  }
+
   .agent-banner {
     flex: 0 0 auto;
     display: flex;
@@ -459,6 +606,42 @@
     background: var(--surface-2);
     font-size: 0.72rem;
     color: var(--amber);
+  }
+
+  .signer-bar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.55rem 0.9rem;
+    border-bottom: 1px solid var(--line-soft);
+    background: var(--surface-2);
+  }
+
+  .signer-bar > div {
+    display: grid;
+    gap: 0.12rem;
+    min-width: 0;
+  }
+
+  .signer-bar strong {
+    color: var(--ink);
+    font-size: 0.72rem;
+  }
+
+  .signer-bar span,
+  .signer-notice {
+    color: var(--muted);
+    font-size: 0.64rem;
+    line-height: 1.35;
+  }
+
+  .signer-notice {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0.35rem 0.9rem;
+    border-bottom: 1px solid var(--line-soft);
   }
 
   .agent-scroll {
@@ -606,6 +789,30 @@
   .proposal-actions {
     display: flex;
     gap: 0.35rem;
+  }
+
+  .tx-link {
+    width: fit-content;
+    color: var(--accent);
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .tx-link:hover {
+    text-decoration: underline;
+  }
+
+  .money-paused {
+    margin: 0;
+    padding: 0.35rem 0.65rem;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--red);
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   .skeleton {

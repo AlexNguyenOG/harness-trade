@@ -14,15 +14,18 @@
   "dependencies": {
     "@ellipsis-labs/rise": "^0.4.60",
     "@privy-io/js-sdk-core": "^0.67.0",
+    "@privy-io/node": "0.28.0",
     "@resvg/resvg-js": "^2.6.2",
     "@solana/web3.js": "^1.98.4",
     "@harness-trade/ui": "workspace:*",
     "@vercel/analytics": "^2.0.1",
     "@vercel/blob": "^2.5.0",
     "buffer": "^6.0.3",
+    "eve": "0.27.12",
     "lightweight-charts": "^5.2.0",
     "qrcode": "^1.5.4",
-    "satori": "^0.26.0"
+    "satori": "^0.26.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.10",
