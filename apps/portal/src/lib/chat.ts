@@ -13,6 +13,10 @@ import { getPrivyAccessToken } from "./privy-auth";
 const CHAT_OPEN_KEY = "harness.chat.v1";
 const CHAT_ENDPOINT = "/api/chat";
 const UNGROUNDED_FALLBACK = "I can't ground that answer in the data I have.";
+const UNAVAILABLE_FALLBACK =
+  "Desk model unavailable — try again in a moment.";
+const NO_ACTION_FALLBACK =
+  "No trade action was queued. Try: long SOL $50 @ 3x market.";
 
 export type ChatUiMessage = ChatMessage & {
   model?: string;
@@ -139,6 +143,7 @@ export async function sendChatMessage(
 
   let payload: {
     reply?: string | null;
+    reason?: unknown;
     model?: unknown;
     proLabel?: unknown;
     actions?: unknown;
@@ -146,6 +151,7 @@ export async function sendChatMessage(
   try {
     payload = (await response.json()) as {
       reply?: string | null;
+      reason?: unknown;
       model?: unknown;
       proLabel?: unknown;
       actions?: unknown;
@@ -156,11 +162,18 @@ export async function sendChatMessage(
   }
 
   const reply = typeof payload.reply === "string" ? payload.reply.trim() : "";
+  const reason = typeof payload.reason === "string" ? payload.reason : "";
   const model = typeof payload.model === "string" ? payload.model : null;
   const proLabel = payload.proLabel === true;
+  const fallback =
+    reason === "unavailable"
+      ? UNAVAILABLE_FALLBACK
+      : reason === "no-action"
+        ? NO_ACTION_FALLBACK
+        : UNGROUNDED_FALLBACK;
   pushMessage({
     role: "assistant",
-    content: reply.length > 0 ? reply : UNGROUNDED_FALLBACK,
+    content: reply.length > 0 ? reply : fallback,
     ...(model ? { model } : {}),
     proLabel,
   });

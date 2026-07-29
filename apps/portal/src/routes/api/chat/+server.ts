@@ -157,21 +157,43 @@ export const POST: RequestHandler = async ({ request, fetch, setHeaders }) => {
     });
   }
 
+  const agentEnabled = body.agentMode !== undefined;
+  const facts = [
+    contextJson,
+    ...history.map((message) => message.content),
+    ...generated.toolFacts,
+  ].join("\n");
+
   // Grounding facts include the conversation itself: a number the user
   // typed is a given fact — echoing it back is not invention.
-  // Action summaries are exempt from digit grounding (ids/symbols).
+  // Agent write tools are the source of truth for trades — never drop a
+  // successful tool batch because narration failed digit-grounding.
   let reply = generated.reply;
   if (reply) {
-    reply = groundedOrNull(
-      reply,
-      [
-        contextJson,
-        ...history.map((message) => message.content),
-        ...generated.toolFacts,
-      ].join("\n"),
-    );
+    const grounded = groundedOrNull(reply, facts);
+    if (grounded) {
+      reply = grounded;
+    } else if (agentEnabled && generated.actions.length > 0) {
+      reply = `Queued ${generated.actions.length} action(s).`;
+    } else if (agentEnabled) {
+      // Model talked about trading without calling tools (or invented digits).
+      reply = null;
+    } else {
+      reply = null;
+    }
   }
+
   if (reply === null && generated.actions.length === 0) {
+    if (agentEnabled) {
+      return json({
+        reply:
+          "No trade action was queued. Say it like: long SOL $50 @ 3x market — I need a tool call, not a description.",
+        reason: "no-action",
+        model: generated.resolved.model,
+        proLabel: generated.resolved.proLabel,
+        actions: [],
+      });
+    }
     return json({
       reply: null,
       reason: "ungrounded",
@@ -181,11 +203,10 @@ export const POST: RequestHandler = async ({ request, fetch, setHeaders }) => {
     });
   }
 
-  // When actions are present but grounding failed, keep a terse status line.
   const safeReply =
     reply ??
     (generated.actions.length > 0
-      ? `Queued ${generated.actions.length} action(s) for review.`
+      ? `Queued ${generated.actions.length} action(s).`
       : null);
 
   return json({
