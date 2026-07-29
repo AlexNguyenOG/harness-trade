@@ -278,9 +278,7 @@
       bind:this={inputEl}
       bind:value={draft}
       rows={layout === "page" ? 3 : 2}
-      placeholder={$agentState.mode === "auto"
-        ? "e.g. long SOL $100 @ 3x market…"
-        : "Message the agent…"}
+      placeholder="e.g. long SOL $50 @ 3x market…"
       disabled={$chatState.phase === "waiting"}
       onkeydown={onKeydown}
     ></textarea>
@@ -326,23 +324,27 @@
   .agent-head {
     flex: 0 0 auto;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
     padding: 0.65rem 0.9rem;
     border-bottom: 1px solid var(--line-soft);
+    /* Avoid reflow when mode/model pills toggle active styles. */
+    min-height: 2.75rem;
   }
 
   .layout-page .agent-head {
     padding: 0.85rem 1.25rem;
+    min-height: 3.1rem;
   }
 
   .agent-head-left,
   .agent-head-right {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     gap: 0.45rem;
+    min-width: 0;
   }
 
   .agent-title-row {
@@ -379,22 +381,31 @@
 
   .picker {
     display: inline-flex;
+    flex: 0 0 auto;
     border: 1px solid var(--line-soft);
     background: var(--surface-2);
   }
 
   .picker button {
+    box-sizing: border-box;
     color: var(--muted);
     font: inherit;
     font-size: 0.62rem;
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    padding: 0.22rem 0.4rem;
+    /* Equal slots — OBSERVE is the longest label; prevents shift on mode change. */
+    min-width: 4.75rem;
+    padding: 0.22rem 0.35rem;
     border: 0;
     border-right: 1px solid var(--line-soft);
     background: transparent;
     cursor: pointer;
+    text-align: center;
+  }
+
+  .picker.model button {
+    min-width: 3.1rem;
   }
 
   .picker button:last-child {
@@ -411,14 +422,18 @@
   }
 
   .ghost {
+    box-sizing: border-box;
     color: var(--muted);
     font: inherit;
     font-size: 0.7rem;
     font-weight: 600;
+    /* Pause / Resume same width so toggling PAUSE doesn't nudge the row. */
+    min-width: 4.25rem;
     padding: 0.28rem 0.45rem;
     border: 1px solid var(--line-soft);
     background: transparent;
     cursor: pointer;
+    text-align: center;
   }
 
   .ghost:hover {
@@ -481,6 +496,8 @@
     margin: 0 0 1rem;
     font-size: 0.82rem;
     line-height: 1.45;
+    /* Mode copy lengths differ — lock height so Observe→Ask doesn't jump. */
+    min-height: 2.6em;
   }
 
   .agent-empty ul {
