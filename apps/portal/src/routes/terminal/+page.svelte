@@ -6264,7 +6264,6 @@
     {tradeMode}
     {selectedSymbol}
     {watchlist}
-    {news}
     {activeSection}
     {topbarHeight}
     bind:railHeight={marketRailHeight}

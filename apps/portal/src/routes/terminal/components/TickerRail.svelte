@@ -1,10 +1,8 @@
 <script lang="ts">
-  import type { NewsItem } from "$lib/intel";
   import type { PhoenixMarketStats } from "$lib/phoenix-market-data";
   import type { SpotAsset } from "$lib/spot";
   import { SECTION_LINKS } from "$lib/terminal/prefs";
   import { formatNumber, formatPercent, formatPrice } from "$lib/utils";
-  import NewsMarquee from "./NewsMarquee.svelte";
   import TickerStat from "./TickerStat.svelte";
 
   // Hot leaf: the grouped perp/spot models are rebuilt by the page per tick
@@ -18,7 +16,6 @@
     tradeMode,
     selectedSymbol,
     watchlist,
-    news,
     activeSection,
     topbarHeight,
     railHeight = $bindable(0),
@@ -41,7 +38,6 @@
     tradeMode: "perps" | "spot";
     selectedSymbol: string;
     watchlist: string[];
-    news: NewsItem[];
     activeSection: string;
     topbarHeight: number;
     railHeight?: number;
@@ -187,8 +183,6 @@
       </button>
     {/each}
   </nav>
-
-  <NewsMarquee {news} />
 </div>
 
 <style>
