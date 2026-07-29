@@ -14,6 +14,10 @@ const CHAT_OPEN_KEY = "harness.chat.v1";
 const CHAT_ENDPOINT = "/api/chat";
 const UNGROUNDED_FALLBACK = "I can't ground that answer in the data I have.";
 const UNAVAILABLE_FALLBACK = "Desk model unavailable — try again in a moment.";
+const PROVIDER_BALANCE_FALLBACK =
+  "DeepSeek balance is empty (402). Top up at platform.deepseek.com, or set AI_GATEWAY_API_KEY on Vercel Preview as a fallback.";
+const MISSING_KEY_FALLBACK =
+  "Chat model key missing on this environment (DEEPSEEK_API_KEY / AI_GATEWAY_API_KEY).";
 const NO_ACTION_FALLBACK =
   "No trade action was queued. Try: long SOL $50 @ 3x market.";
 
@@ -165,11 +169,15 @@ export async function sendChatMessage(
   const model = typeof payload.model === "string" ? payload.model : null;
   const proLabel = payload.proLabel === true;
   const fallback =
-    reason === "unavailable"
-      ? UNAVAILABLE_FALLBACK
-      : reason === "no-action"
-        ? NO_ACTION_FALLBACK
-        : UNGROUNDED_FALLBACK;
+    reason === "provider-balance"
+      ? PROVIDER_BALANCE_FALLBACK
+      : reason === "missing-key"
+        ? MISSING_KEY_FALLBACK
+        : reason === "unavailable"
+          ? UNAVAILABLE_FALLBACK
+          : reason === "no-action"
+            ? NO_ACTION_FALLBACK
+            : UNGROUNDED_FALLBACK;
   pushMessage({
     role: "assistant",
     content: reply.length > 0 ? reply : fallback,
