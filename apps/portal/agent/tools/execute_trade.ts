@@ -83,7 +83,7 @@ type Input = z.infer<typeof inputSchema>;
 
 export default defineTool({
   description:
-    "Execute an authenticated live trade, cancellation, close, reversal, TP/SL update, or margin action. The server resolves the signed-in user's delegated wallet, builds and simulates the transaction, then signs and broadcasts through Privy. Never accepts wallet ids, keys, or transactions from the model.",
+    "Execute an authenticated live trade, cancellation, close, reversal, TP/SL update, or margin action. The server resolves the signed-in user's isolated EVE wallet, builds and simulates the transaction, then signs and broadcasts inside the server runtime. Never accepts wallet ids, keys, or transactions from the model.",
   inputSchema,
   approval: (ctx: ApprovalContext<Input>) =>
     transactionApproval(

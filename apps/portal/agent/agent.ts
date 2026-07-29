@@ -9,7 +9,6 @@ export default defineAgent({
   build: {
     externalDependencies: [
       "@ellipsis-labs/rise",
-      "@privy-io/node",
       "@solana/web3.js",
       "buffer",
     ],

@@ -22,9 +22,9 @@ import { SOL_MINT, USDC_MINT } from "../../src/lib/funding";
 import { appendTransaction } from "./ledger";
 import {
   getServerWallet,
-  signAndSendWithPrivy,
+  signAndSendWithServerWallet,
   type ServerWalletProfile,
-} from "./privy-wallet";
+} from "./server-wallet";
 
 const JUPITER_API = "https://lite-api.jup.ag";
 const TOKENS_API = "https://api.tokens.xyz/v1";
@@ -107,15 +107,6 @@ async function currentPhoenixPrice(symbol: string): Promise<number> {
   return finitePositive(price, "phoenix-price");
 }
 
-async function idempotencyKey(ctx: ToolContext, suffix: string): Promise<string> {
-  const material = `${ctx.session.id}:${ctx.session.turn.id}:${ctx.callId}:${suffix}`;
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(material),
-  );
-  return Buffer.from(digest).toString("hex").slice(0, 48);
-}
-
 function validateWalletTransaction(
   transaction: VersionedTransaction,
   wallet: ServerWalletProfile,
@@ -130,10 +121,10 @@ function validateWalletTransaction(
 }
 
 async function sendVersioned(
-  ctx: ToolContext,
+  _ctx: ToolContext,
   wallet: ServerWalletProfile,
   transaction: VersionedTransaction,
-  suffix: string,
+  _suffix: string,
 ): Promise<string> {
   validateWalletTransaction(transaction, wallet);
   const connection = createSolanaConnection(rpcUrl());
@@ -145,11 +136,10 @@ async function sendVersioned(
       `transaction-simulation-failed:${JSON.stringify(simulation.value.err)}`,
     );
   }
-  return signAndSendWithPrivy({
+  return signAndSendWithServerWallet({
     wallet,
-    transaction: transaction.serialize(),
-    idempotencyKey: await idempotencyKey(ctx, suffix),
-    referenceId: `harness:${ctx.session.id}:${ctx.callId}:${suffix}`,
+    transaction,
+    connection,
   });
 }
 
@@ -202,7 +192,7 @@ async function serverContext(ctx: ToolContext) {
   ) {
     throw new Error("agent-session-owner-mismatch");
   }
-  const wallet = await getServerWallet(principal.principalId);
+  const wallet = getServerWallet(principal.principalId);
   return { wallet, trader: await fetchPhoenixTraderState(wallet.address) };
 }
 
@@ -580,7 +570,7 @@ async function placeSpot(
   if (!principalId || principalId !== ctx.session.auth.initiator?.principalId) {
     throw new Error("agent-session-owner-mismatch");
   }
-  const wallet = await getServerWallet(principalId);
+  const wallet = getServerWallet(principalId);
   const asset = await fetchSpotAsset(input.symbol);
   const sizeUsd = finitePositive(input.sizeUsd, "size-usd", 1_000_000);
   const inputMint = input.side === "buy" ? USDC_MINT : asset.mint;
@@ -689,7 +679,7 @@ async function cancelSpot(
   if (!principalId || principalId !== ctx.session.auth.initiator?.principalId) {
     throw new Error("agent-session-owner-mismatch");
   }
-  const wallet = await getServerWallet(principalId);
+  const wallet = getServerWallet(principalId);
   const response = await fetch(`${JUPITER_API}/trigger/v1/cancelOrder`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -724,14 +714,15 @@ export async function getPortfolio(ctx: ToolContext) {
   if (!principalId || principalId !== ctx.session.auth.initiator?.principalId) {
     throw new Error("agent-session-owner-mismatch");
   }
-  const wallet = await getServerWallet(principalId);
+  const wallet = getServerWallet(principalId);
   const trader = await fetchPhoenixTraderState(wallet.address);
   const connection = createSolanaConnection(rpcUrl());
   const solBalance = await connection.getBalance(new PublicKey(wallet.address));
   return {
     wallet: {
       address: wallet.address,
-      serverSigningEnabled: wallet.signerAttached,
+      serverSigningEnabled: true,
+      custody: "eve-server",
       solBalance: solBalance / 1e9,
     },
     phoenix: trader,

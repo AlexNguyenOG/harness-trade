@@ -9,11 +9,8 @@
   import { AGENT_MODE_LABEL, type AgentMode } from "$lib/agent/modes";
   import { agentState, getAgentPolicy, setAgentMode, setAgentPaused } from "$lib/agent/state";
   import {
-    enableServerAgentSigning,
     getPrivyAccessToken,
     privyAuth,
-    revokeServerAgentSigning,
-    serverSigner,
   } from "$lib/privy-auth";
 
   let {
@@ -35,8 +32,6 @@
   let draft = $state("");
   let scrollEl: HTMLDivElement | null = $state(null);
   let inputEl: HTMLTextAreaElement | null = $state(null);
-  let signerNotice = $state<string | null>(null);
-
   const agentModes: AgentMode[] = ["observe", "ask", "auto"];
   const SESSION_KEY = "harness.eve.session.v1";
   const EVENTS_KEY = "harness.eve.events.v1";
@@ -177,20 +172,6 @@
     if (request) void answer(request.requestId, approved);
   }
 
-  async function setSigning(enabled: boolean): Promise<void> {
-    signerNotice = null;
-    try {
-      if (enabled) await enableServerAgentSigning();
-      else await revokeServerAgentSigning();
-      signerNotice = enabled
-        ? "Server signing enabled. You can revoke it at any time."
-        : "Server signing revoked.";
-    } catch (error) {
-      signerNotice =
-        error instanceof Error ? error.message : "server-signer-error";
-    }
-  }
-
   function resetSession(): void {
     eve.reset();
     if (browser) {
@@ -219,8 +200,8 @@
         <span class="tag durable">
           DURABLE{pendingRequests.length ? ` · ${pendingRequests.length}` : ""}
         </span>
-        {#if accountMode === "live" && $serverSigner.enabled}
-          <span class="tag signing">LIVE · SIGNING</span>
+        {#if accountMode === "live" && $privyAuth.authenticated}
+          <span class="tag signing">LIVE · SERVER WALLET</span>
         {/if}
         {#if $agentState.paused}
           <span class="tag pause" title="Money-PAUSE engaged">PAUSE</span>
@@ -258,17 +239,6 @@
       >
         {$agentState.paused ? "Resume" : "Pause"}
       </button>
-      {#if accountMode === "live" && $serverSigner.enabled}
-        <button
-          class="ghost revoke"
-          type="button"
-          disabled={$serverSigner.busy}
-          onclick={() => void setSigning(false)}
-          title="Revoke persistent server signing"
-        >
-          Revoke
-        </button>
-      {/if}
       <button class="ghost" type="button" onclick={resetSession} title="New durable session">
         New
       </button>
@@ -283,28 +253,6 @@
     </div>
   </header>
 
-  {#if accountMode === "live" && $privyAuth.authenticated && !$serverSigner.enabled}
-    <div class="signer-bar">
-      <div>
-        <strong>Enable persistent server signing</strong>
-        <span>
-          Explicit one-time wallet grant. Private keys never leave Privy.
-        </span>
-      </div>
-      <button
-        class="primary"
-        type="button"
-        disabled={$serverSigner.busy || !$serverSigner.configured}
-        onclick={() => void setSigning(true)}
-      >
-        {$serverSigner.busy ? "Working…" : "Enable"}
-      </button>
-    </div>
-    {#if signerNotice || $serverSigner.error}
-      <p class="signer-notice">{signerNotice ?? $serverSigner.error}</p>
-    {/if}
-  {/if}
-
   <div class="agent-scroll" bind:this={scrollEl}>
     <div class="agent-thread">
       {#if eve.data.messages.length === 0 && eve.status === "ready"}
@@ -318,6 +266,7 @@
                 : "Ask mode — every transaction waits for your approval."}
           </p>
           <ul>
+            <li>show my EVE wallet address and balance</li>
             <li>long SOL $50 @ 3x market</li>
             <li>show my live positions and open orders</li>
             <li>move stop to break-even on SOL</li>
@@ -590,11 +539,6 @@
     color: var(--red);
   }
 
-  .ghost.revoke {
-    min-width: 3.6rem;
-    color: var(--faint);
-  }
-
   .agent-banner {
     flex: 0 0 auto;
     display: flex;
@@ -606,42 +550,6 @@
     background: var(--surface-2);
     font-size: 0.72rem;
     color: var(--amber);
-  }
-
-  .signer-bar {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.55rem 0.9rem;
-    border-bottom: 1px solid var(--line-soft);
-    background: var(--surface-2);
-  }
-
-  .signer-bar > div {
-    display: grid;
-    gap: 0.12rem;
-    min-width: 0;
-  }
-
-  .signer-bar strong {
-    color: var(--ink);
-    font-size: 0.72rem;
-  }
-
-  .signer-bar span,
-  .signer-notice {
-    color: var(--muted);
-    font-size: 0.64rem;
-    line-height: 1.35;
-  }
-
-  .signer-notice {
-    flex: 0 0 auto;
-    margin: 0;
-    padding: 0.35rem 0.9rem;
-    border-bottom: 1px solid var(--line-soft);
   }
 
   .agent-scroll {
