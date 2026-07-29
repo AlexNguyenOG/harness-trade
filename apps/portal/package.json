@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@ellipsis-labs/rise": "^0.4.60",
+    "@noble/hashes": "1.8.0",
     "@privy-io/js-sdk-core": "^0.67.0",
     "@privy-io/node": "0.28.0",
     "@resvg/resvg-js": "^2.6.2",

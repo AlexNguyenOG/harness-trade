@@ -6,4 +6,12 @@ export default defineAgent({
   model: "openai/gpt-5.4",
   reasoning: "medium",
   compaction: { thresholdPercent: 0.78 },
+  build: {
+    externalDependencies: [
+      "@ellipsis-labs/rise",
+      "@privy-io/node",
+      "@solana/web3.js",
+      "buffer",
+    ],
+  },
 });
