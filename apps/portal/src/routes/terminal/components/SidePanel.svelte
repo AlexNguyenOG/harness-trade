@@ -1,13 +1,6 @@
 <script lang="ts">
-  // Side-chat dock — the visible half of PRD #563 (WP3).
-  //
-  // Summon-only right-dock: zero weight when closed (the page lazy-mounts this
-  // component only on first open). The panel never imports page state — the
-  // page hands it a buildContext closure that snapshots the live desk at send
-  // time, and an onRequestAuth callback for the sign-in nudge. All transport +
-  // state live in $lib/chat (WP2); this component is presentation only.
-  //
-  // Svelte 5 runes only (pitfall 5): $props/$state/$effect, no export let / $:.
+  // Agent harness dock — Desk chat + approval modes (observe / ask / auto).
+  // Summon-only; zero weight when closed (page lazy-mounts on first open).
   import {
     chatState,
     closeChat,
@@ -15,13 +8,29 @@
     setModelChoice,
   } from "$lib/chat";
   import { PRO_LABEL, type ChatModelChoice } from "$lib/chat-models";
+  import {
+    AGENT_MODE_LABEL,
+    type AgentMode,
+  } from "$lib/agent/modes";
+  import {
+    acceptAllPending,
+    acceptProposal,
+    rejectProposal,
+  } from "$lib/agent/runtime";
+  import {
+    agentState,
+    setAgentMode,
+    setAgentPaused,
+  } from "$lib/agent/state";
 
   let {
     buildContext,
     onRequestAuth,
+    accountMode = "paper",
   }: {
     buildContext: () => Record<string, unknown>;
     onRequestAuth: () => void;
+    accountMode?: "live" | "paper";
   } = $props();
 
   let draft = $state("");
@@ -33,12 +42,34 @@
     { value: "pro", label: "Pro" },
   ];
 
+  const agentModes: AgentMode[] = ["observe", "ask", "auto"];
+
+  const pendingAsk = $derived(
+    $agentState.proposals.filter(
+      (proposal) =>
+        proposal.status === "pending" && proposal.verdict.decision === "ask",
+    ),
+  );
+
+  const activeProposals = $derived(
+    $agentState.proposals.filter(
+      (proposal) =>
+        proposal.status === "pending" ||
+        proposal.status === "running" ||
+        proposal.status === "failed" ||
+        proposal.status === "done" ||
+        proposal.status === "skipped" ||
+        proposal.status === "rejected",
+    ),
+  );
+
   // Pin the conversation to its newest turn whenever the list grows or the
   // phase flips to the waiting skeleton.
   $effect(() => {
     if (!scrollEl) return;
     void $chatState.messages.length;
     void $chatState.phase;
+    void $agentState.proposals.length;
     scrollEl.scrollTop = scrollEl.scrollHeight;
   });
 
@@ -46,37 +77,141 @@
     event.preventDefault();
     const text = draft;
     draft = "";
-    void sendChatMessage(text, buildContext());
+    void sendChatMessage(text, buildContext(), { accountMode });
+  }
+
+  function onMode(mode: AgentMode): void {
+    setAgentMode(mode);
   }
 </script>
 
-<div class="desk-dock" role="complementary" aria-label="Desk chat">
+<div class="desk-dock" role="complementary" aria-label="Agent desk">
   <header class="desk-head">
-    <div class="desk-title-row">
-      <span class="desk-title">Desk</span>
-      <div class="desk-model-picker" role="radiogroup" aria-label="Chat model">
-        {#each modelChoices as choice (choice.value)}
+    <div class="desk-title-col">
+      <div class="desk-title-row">
+        <span class="desk-title">Agent</span>
+        {#if $agentState.paused}
+          <span class="desk-pause-tag" title="Money-PAUSE engaged">PAUSE</span>
+        {/if}
+        {#if accountMode === "paper"}
+          <span class="desk-paper-tag">PAPER</span>
+        {/if}
+      </div>
+      <div class="desk-mode-picker" role="radiogroup" aria-label="Approval mode">
+        {#each agentModes as mode (mode)}
           <button
-            class:active={$chatState.modelChoice === choice.value}
+            class:active={$agentState.mode === mode}
+            class:auto={mode === "auto"}
             type="button"
-            aria-pressed={$chatState.modelChoice === choice.value}
-            onclick={() => setModelChoice(choice.value)}
+            aria-pressed={$agentState.mode === mode}
+            title={mode === "auto"
+              ? "Full auto-approve — agent executes allowed actions"
+              : mode === "observe"
+                ? "Read-only — agent cannot trade"
+                : "Ask before each money action"}
+            onclick={() => onMode(mode)}
           >
-            {choice.label}
+            {AGENT_MODE_LABEL[mode]}
           </button>
         {/each}
       </div>
     </div>
-    <button class="ghost" type="button" onclick={closeChat}>Close</button>
+    <div class="desk-head-actions">
+      <button
+        class="ghost"
+        class:pause-on={$agentState.paused}
+        type="button"
+        title="Money-PAUSE kill switch"
+        onclick={() => setAgentPaused(!$agentState.paused)}
+      >
+        {$agentState.paused ? "Resume" : "Pause"}
+      </button>
+      <button class="ghost" type="button" onclick={closeChat}>Close</button>
+    </div>
   </header>
 
+  <div class="desk-subhead">
+    <div class="desk-model-picker" role="radiogroup" aria-label="Chat model">
+      {#each modelChoices as choice (choice.value)}
+        <button
+          class:active={$chatState.modelChoice === choice.value}
+          type="button"
+          aria-pressed={$chatState.modelChoice === choice.value}
+          onclick={() => setModelChoice(choice.value)}
+        >
+          {choice.label}
+        </button>
+      {/each}
+    </div>
+    {#if pendingAsk.length > 0}
+      <button
+        class="secondary desk-accept-all"
+        type="button"
+        onclick={() => void acceptAllPending(accountMode)}
+      >
+        Accept all ({pendingAsk.length})
+      </button>
+    {/if}
+  </div>
+
   <div class="desk-scroll" bind:this={scrollEl}>
-    {#if $chatState.messages.length === 0 && $chatState.phase === "idle"}
-      <p class="desk-empty">Ask the desk about your book or the tape.</p>
+    {#if $chatState.messages.length === 0 && $chatState.phase === "idle" && activeProposals.length === 0}
+      <div class="desk-empty">
+        <p>Agent harness — trade from chat.</p>
+        <p class="desk-empty-hint">
+          {$agentState.mode === "auto"
+            ? "Auto: allowed actions run immediately."
+            : $agentState.mode === "observe"
+              ? "Observe: research only, no trades."
+              : "Ask: review each money action before it runs."}
+        </p>
+      </div>
     {/if}
 
     {#each $chatState.messages as message, index (index)}
-      <div class="desk-msg {message.role}">{#if message.role === "assistant" && message.proLabel}<span class="desk-pro-tag">{PRO_LABEL}</span>{/if}{message.content}</div>
+      <div class="desk-msg {message.role}">
+        {#if message.role === "assistant" && message.proLabel}<span
+            class="desk-pro-tag">{PRO_LABEL}</span
+          >{/if}{message.content}
+      </div>
+    {/each}
+
+    {#each activeProposals as proposal (proposal.id)}
+      <div
+        class="desk-proposal"
+        class:ask={proposal.verdict.decision === "ask"}
+        class:done={proposal.status === "done"}
+        class:failed={proposal.status === "failed" || proposal.status === "skipped"}
+        class:running={proposal.status === "running"}
+      >
+        <div class="desk-proposal-head">
+          <span class="desk-proposal-risk">{proposal.risk}</span>
+          <span class="desk-proposal-status">{proposal.status}</span>
+        </div>
+        <p class="desk-proposal-summary">{proposal.summary}</p>
+        <p class="desk-proposal-reason">{proposal.verdict.reason}</p>
+        {#if proposal.error}
+          <p class="desk-proposal-error">{proposal.error}</p>
+        {/if}
+        {#if proposal.status === "pending" && proposal.verdict.decision === "ask"}
+          <div class="desk-proposal-actions">
+            <button
+              class="primary"
+              type="button"
+              onclick={() => void acceptProposal(proposal.id, accountMode)}
+            >
+              Accept
+            </button>
+            <button
+              class="ghost"
+              type="button"
+              onclick={() => void rejectProposal(proposal.id, accountMode)}
+            >
+              Reject
+            </button>
+          </div>
+        {/if}
+      </div>
     {/each}
 
     {#if $chatState.phase === "waiting"}
@@ -88,7 +223,7 @@
 
     {#if $chatState.phase === "auth"}
       <div class="desk-state">
-        <p>Sign in to talk to the desk.</p>
+        <p>Sign in to talk to the agent.</p>
         <button class="primary desk-state-action" type="button" onclick={onRequestAuth}>
           Sign in
         </button>
@@ -101,13 +236,15 @@
   </div>
 
   <form class="desk-form" onsubmit={submit}>
-    <label class="desk-input-label" for="desk-input">Message the desk</label>
+    <label class="desk-input-label" for="desk-input">Message the agent</label>
     <textarea
       id="desk-input"
       class="desk-input"
       bind:value={draft}
       rows="2"
-      placeholder="Message the desk…"
+      placeholder={$agentState.mode === "auto"
+        ? "e.g. long SOL $100 @ 3x market…"
+        : "Message the agent…"}
       disabled={$chatState.phase === "waiting"}
     ></textarea>
     <button
@@ -121,20 +258,7 @@
 </div>
 
 <style>
-  /* Desktop: a sticky right column in the dashboard's reserved 380px track.
-     The page adds that track (via .dashboard.chat-open) only when open, so
-     closed = this component isn't mounted = zero layout effect. The dock
-     spans many grid rows so position:sticky keeps it pinned for the whole
-     dashboard scroll (the dashboard has no explicit grid-template-rows, so
-     `1 / -1` can't be used — a generous span is the reliable form). */
   .desk-dock {
-    /* Fixed, not sticky-in-grid: the grid places row 1 below the rail's
-       actual content offset (~97px past --anchor-top), so a sticky panel
-       sized to 100dvh - anchor starts that much too low and pushes the
-       input below the fold at scroll 0 (geometry-probed). Fixed pins the
-       whole panel — input included — into the viewport; the dashboard's
-       empty 380px 13th track (.chat-open) reserves the layout space this
-       panel visually occupies. --anchor-top still inherits from .dashboard. */
     position: fixed;
     right: 0;
     top: var(--anchor-top, 3rem);
@@ -145,23 +269,30 @@
     min-height: 0;
     background: var(--surface);
     border-left: 1px solid var(--line);
-    z-index: 15; /* below topbar (20), above panel content */
+    z-index: 15;
   }
 
   .desk-head {
     flex: 0 0 auto;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 0.5rem;
-    padding: 0.6rem 0.75rem;
+    padding: 0.55rem 0.75rem;
     border-bottom: 1px solid var(--line-soft);
+  }
+
+  .desk-title-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
   }
 
   .desk-title-row {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
+    gap: 0.4rem;
     min-width: 0;
   }
 
@@ -173,12 +304,33 @@
     text-transform: uppercase;
   }
 
+  .desk-pause-tag,
+  .desk-paper-tag {
+    font-size: 0.55rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.1rem 0.28rem;
+    border: 1px solid var(--line-soft);
+  }
+
+  .desk-pause-tag {
+    color: var(--red);
+    border-color: var(--red);
+  }
+
+  .desk-paper-tag {
+    color: var(--amber);
+  }
+
+  .desk-mode-picker,
   .desk-model-picker {
     display: inline-flex;
     border: 1px solid var(--line-soft);
     background: var(--surface-2);
   }
 
+  .desk-mode-picker button,
   .desk-model-picker button {
     color: var(--muted);
     font: inherit;
@@ -193,13 +345,44 @@
     cursor: pointer;
   }
 
+  .desk-mode-picker button:last-child,
   .desk-model-picker button:last-child {
     border-right: 0;
   }
 
+  .desk-mode-picker button.active,
   .desk-model-picker button.active {
     color: var(--accent);
     background: var(--surface);
+  }
+
+  .desk-mode-picker button.auto.active {
+    color: var(--up);
+  }
+
+  .desk-head-actions {
+    display: flex;
+    gap: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  .desk-head-actions .pause-on {
+    color: var(--red);
+  }
+
+  .desk-subhead {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .desk-accept-all {
+    font-size: 0.62rem;
+    padding: 0.2rem 0.4rem;
   }
 
   .desk-scroll {
@@ -220,7 +403,16 @@
     text-align: center;
   }
 
-  /* Plain text only — no markdown. pre-wrap preserves the model's line breaks. */
+  .desk-empty p {
+    margin: 0;
+  }
+
+  .desk-empty-hint {
+    margin-top: 0.35rem;
+    color: var(--muted);
+    font-size: 0.7rem;
+  }
+
   .desk-msg {
     color: var(--ink);
     font-size: 0.8rem;
@@ -248,15 +440,70 @@
     background: var(--surface-2);
   }
 
-  /* Assistant turns wear the same accent left-rule as AiReadLine's desk note
-     (--pink isn't a token; #ff4d97 is --accent). */
   .desk-msg.assistant {
     border-left: 2px solid var(--accent);
     padding-left: 0.5rem;
   }
 
-  /* Waiting skeleton — AiReadLine's rhythm (two bars, 2.2s sweep) copied in so
-     this chunk doesn't pull AiReadLine. Token-only gradient (no fallback hex). */
+  .desk-proposal {
+    border: 1px solid var(--line-soft);
+    background: var(--surface-2);
+    padding: 0.5rem 0.55rem;
+    display: grid;
+    gap: 0.3rem;
+  }
+
+  .desk-proposal.ask {
+    border-color: var(--amber);
+  }
+
+  .desk-proposal.done {
+    border-color: var(--up);
+  }
+
+  .desk-proposal.failed {
+    border-color: var(--red);
+  }
+
+  .desk-proposal.running {
+    border-color: var(--accent);
+  }
+
+  .desk-proposal-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.58rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .desk-proposal-summary {
+    margin: 0;
+    color: var(--ink);
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+
+  .desk-proposal-reason,
+  .desk-proposal-error {
+    margin: 0;
+    font-size: 0.68rem;
+    color: var(--muted);
+  }
+
+  .desk-proposal-error {
+    color: var(--red);
+  }
+
+  .desk-proposal-actions {
+    display: flex;
+    gap: 0.35rem;
+    margin-top: 0.15rem;
+  }
+
   .desk-skeleton {
     border-left: 2px solid var(--accent);
     padding-left: 0.5rem;
@@ -292,7 +539,6 @@
     }
   }
 
-  /* Honest limit/auth/error notes, centered like the empty state. */
   .desk-state {
     margin: auto;
     display: grid;
@@ -321,7 +567,6 @@
     border-top: 1px solid var(--line-soft);
   }
 
-  /* Visually-hidden label (a11y): the textarea's placeholder is not a label. */
   .desk-input-label {
     position: absolute;
     width: 1px;
@@ -359,8 +604,6 @@
     align-self: flex-end;
   }
 
-  /* Mobile (<1101px): the dashboard stops reserving a track; the dock becomes
-     a full-viewport sheet under the sticky chrome. */
   @media (max-width: 1100px) {
     .desk-dock {
       position: fixed;

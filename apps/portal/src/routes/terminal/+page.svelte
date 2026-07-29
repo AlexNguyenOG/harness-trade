@@ -163,6 +163,12 @@
   } from "$lib/intel";
   import { chatState, closeChat, toggleChat } from "$lib/chat";
   import { buildDeskContext } from "$lib/chat-context";
+  import {
+    registerAgentHost,
+    unregisterAgentHost,
+    type AgentActionResult,
+  } from "$lib/agent/host";
+  import { agentState } from "$lib/agent/state";
   import { fetchMintSafety, fetchSolanaLamports, solanaRpcUrl } from "$lib/solana-rpc";
   import { swrRead, swrWrite } from "$lib/swr";
   import {
@@ -1256,6 +1262,15 @@
     };
   }
 
+  // Harness UI: when the agent dock is open, suppress legacy AiReadLine chrome
+  // so the side panel is the single AI surface (Cursor-like).
+  $: harnessCompact = $agentState.harnessUi && $chatState.open;
+  $: viewFundingRead = harnessCompact ? IDLE_READ : fundingRead;
+  $: viewBriefRead = harnessCompact ? IDLE_READ : briefRead;
+  $: viewScannerRead = harnessCompact ? IDLE_READ : scannerRead;
+  $: viewRecapRead = harnessCompact ? IDLE_READ : recapRead;
+  $: viewEventRead = harnessCompact ? IDLE_READ : eventRead;
+
   // Side-chat grounding snapshot (PRD #563, WP2 serializer): assembled at
   // send time from the page's live state so the model always sees the current
   // desk. The panel never imports page state — it only calls this closure.
@@ -1553,6 +1568,316 @@
       displayTimezone,
     );
 
+  function agentOk(message: string): AgentActionResult {
+    return { ok: true, message };
+  }
+
+  function agentFail(message: string): AgentActionResult {
+    return { ok: false, message };
+  }
+
+  function agentNum(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }
+
+  function applyAgentTicketFields(args: Record<string, unknown>): void {
+    if (args.side === "buy" || args.side === "sell") $tradeSide = args.side;
+    if (args.orderType === "market" || args.orderType === "limit") {
+      $tradeType = args.orderType;
+    }
+    const sizeUsd = agentNum(args.sizeUsd);
+    if (sizeUsd !== null && sizeUsd > 0) {
+      $sizingMode = "usd";
+      $tradeAmount = String(sizeUsd);
+    }
+    const leverage = agentNum(args.leverage);
+    if (leverage !== null && leverage > 0) $tradeLeverage = leverage;
+    const limitPrice = agentNum(args.limitPrice);
+    if (limitPrice !== null && limitPrice > 0) {
+      $tradeLimitPrice = String(limitPrice);
+    }
+    const takeProfit = agentNum(args.takeProfit);
+    if (takeProfit !== null && takeProfit > 0) {
+      $tradeTakeProfit = String(takeProfit);
+    }
+    const stopLoss = agentNum(args.stopLoss);
+    if (stopLoss !== null && stopLoss > 0) {
+      $tradeStopLoss = String(stopLoss);
+    }
+    if (typeof args.reduceOnly === "boolean") {
+      $tradeReduceOnly = args.reduceOnly;
+    }
+  }
+
+  function wireAgentHost(): void {
+    registerAgentHost({
+      switch_market: async (args) => {
+        const symbol =
+          typeof args.symbol === "string" ? args.symbol.toUpperCase() : "";
+        if (!symbol) return agentFail("symbol required");
+        if (tradeMode !== "perps") setTradeMode("perps", false);
+        await switchPhoenixMarket(symbol);
+        return agentOk(`market ${symbol}`);
+      },
+      set_timeframe: (args) => {
+        const tf = args.timeframe;
+        if (
+          typeof tf !== "string" ||
+          !PHOENIX_TIMEFRAMES.includes(tf as PhoenixTimeframe)
+        ) {
+          return agentFail("invalid timeframe");
+        }
+        selectedTimeframe = tf as PhoenixTimeframe;
+        return agentOk(`timeframe ${tf}`);
+      },
+      set_ticket: (args) => {
+        applyAgentTicketFields(args);
+        tradeOpen = true;
+        return agentOk("ticket updated");
+      },
+      place_perp_order: async (args) => {
+        if (typeof args.symbol === "string" && args.symbol) {
+          const symbol = args.symbol.toUpperCase();
+          if (symbol !== selectedSymbol) {
+            if (tradeMode !== "perps") setTradeMode("perps", false);
+            await switchPhoenixMarket(symbol);
+          }
+        }
+        applyAgentTicketFields(args);
+        if (paperMode) await submitPaperOrder();
+        else await submitPhoenixOrder();
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk("perp order submitted");
+      },
+      place_spot_order: async (args) => {
+        if (tradeMode !== "spot") setTradeMode("spot", false);
+        applyAgentTicketFields(args);
+        await submitSpotLimitOrder();
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk("spot order submitted");
+      },
+      cancel_order: async (args) => {
+        const orderId = typeof args.orderId === "string" ? args.orderId : "";
+        if (!orderId) return agentFail("orderId required");
+        if (args.venue === "spot") {
+          if (paperMode) {
+            paperLedger.set(cancelPaperSpotLimit($paperLedger, orderId));
+            return agentOk("paper spot cancelled");
+          }
+          await cancelSpotLimitOrder(orderId);
+          return agentOk("spot cancel sent");
+        }
+        if (paperMode) {
+          paperLedger.set(cancelPaperOrder($paperLedger, orderId));
+          return agentOk("paper order cancelled");
+        }
+        const order = perpOpenOrders.find(
+          (row) => row.orderSequenceNumber === orderId,
+        );
+        if (!order) return agentFail("order not found");
+        await cancelPhoenixOrderById(order);
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk("cancelled");
+      },
+      cancel_symbol_orders: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const side = args.side;
+        if (paperMode) {
+          let next = $paperLedger;
+          if (side === "buy" || side === "sell") {
+            next = cancelPaperOrdersOnSide(
+              next,
+              symbol,
+              side === "buy" ? "bid" : "ask",
+            );
+          } else {
+            next = cancelPaperOrdersOnSide(next, symbol, "bid");
+            next = cancelPaperOrdersOnSide(next, symbol, "ask");
+          }
+          paperLedger.set(next);
+          return agentOk("paper orders cancelled");
+        }
+        if (side === "buy") await cancelPhoenixOrders(symbol, "bid");
+        else if (side === "sell") await cancelPhoenixOrders(symbol, "ask");
+        else await cancelSymbolBookOrders(symbol);
+        return agentOk("orders cancelled");
+      },
+      close_position: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const sub =
+          agentNum(args.subaccountIndex) ??
+          enrichedPositions.find((p) => p.symbol === symbol)?.subaccountIndex ??
+          0;
+        const position = enrichedPositions.find(
+          (row) => row.symbol === symbol && row.subaccountIndex === sub,
+        );
+        if (!position) return agentFail("position not found");
+        await closePhoenixPosition(symbol, position.size, sub, 1);
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk(`closed ${symbol}`);
+      },
+      close_position_fraction: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const fraction = agentNum(args.fraction);
+        if (fraction === null || fraction <= 0 || fraction > 1) {
+          return agentFail("fraction must be in (0,1]");
+        }
+        const sub =
+          agentNum(args.subaccountIndex) ??
+          enrichedPositions.find((p) => p.symbol === symbol)?.subaccountIndex ??
+          0;
+        const position = enrichedPositions.find(
+          (row) => row.symbol === symbol && row.subaccountIndex === sub,
+        );
+        if (!position) return agentFail("position not found");
+        await closePhoenixPosition(symbol, position.size, sub, fraction);
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk(`closed ${Math.round(fraction * 100)}% ${symbol}`);
+      },
+      close_all_positions: async () => {
+        if (paperMode) {
+          flattenPaperPositions();
+          return agentOk("all paper positions closed");
+        }
+        await closeAllPhoenixPositions();
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk("flatten submitted");
+      },
+      set_tp_sl: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const sub =
+          agentNum(args.subaccountIndex) ??
+          enrichedPositions.find((p) => p.symbol === symbol)?.subaccountIndex ??
+          0;
+        const tp =
+          args.takeProfit === null
+            ? null
+            : agentNum(args.takeProfit);
+        const sl =
+          args.stopLoss === null ? null : agentNum(args.stopLoss);
+        if (paperMode) {
+          paperLedger.set(
+            setPaperTpSl($paperLedger, symbol, sub, {
+              ...(tp !== undefined ? { takeProfitPrice: tp } : {}),
+              ...(sl !== undefined ? { stopLossPrice: sl } : {}),
+            }),
+          );
+          return agentOk("paper tp/sl set");
+        }
+        // Live: fill ticket fields and surface the ticket for signed TP/SL
+        // flows that already exist on the position row UI.
+        if (tp !== null && tp !== undefined) $tradeTakeProfit = String(tp);
+        if (sl !== null && sl !== undefined) $tradeStopLoss = String(sl);
+        tradeOpen = true;
+        return agentOk("tp/sl drafted on ticket — confirm via position UI if live");
+      },
+      set_break_even: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const position = enrichedPositions.find((row) => row.symbol === symbol);
+        if (!position?.entryPrice) return agentFail("no entry for break-even");
+        if (paperMode) {
+          paperLedger.set(
+            setPaperTpSl($paperLedger, symbol, position.subaccountIndex, {
+              stopLossPrice: position.entryPrice,
+            }),
+          );
+          return agentOk("paper stop at break-even");
+        }
+        $tradeStopLoss = String(position.entryPrice);
+        tradeOpen = true;
+        return agentOk("break-even stop drafted");
+      },
+      reverse_position: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const position = enrichedPositions.find((row) => row.symbol === symbol);
+        if (!position) return agentFail("position not found");
+        const notional = Math.abs(position.size) * (position.entryPrice ?? 0);
+        await closePhoenixPosition(
+          symbol,
+          position.size,
+          position.subaccountIndex,
+          1,
+        );
+        $tradeSide = position.size > 0 ? "sell" : "buy";
+        $tradeType = "market";
+        if (notional > 0) {
+          $sizingMode = "usd";
+          $tradeAmount = String(notional);
+        }
+        if (paperMode) await submitPaperOrder();
+        else await submitPhoenixOrder();
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk(`reversed ${symbol}`);
+      },
+      add_margin: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const amount = agentNum(args.amountUsd);
+        if (amount === null || amount <= 0) return agentFail("amountUsd required");
+        const position = enrichedPositions.find((row) => row.symbol === symbol);
+        if (!position) return agentFail("position not found");
+        if (paperMode) {
+          paperLedger.set(
+            addPaperMargin(
+              $paperLedger,
+              symbol,
+              position.subaccountIndex,
+              amount,
+            ),
+          );
+          return agentOk("paper margin added");
+        }
+        marginAddValue = String(amount);
+        await submitMarginAdd(position);
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk("margin add submitted");
+      },
+      watchlist_add: (args) => {
+        const symbol =
+          typeof args.symbol === "string" ? args.symbol.toUpperCase() : "";
+        if (!symbol) return agentFail("symbol required");
+        if (!watchlist.includes(symbol)) watchlist = [...watchlist, symbol];
+        return agentOk(`watch +${symbol}`);
+      },
+      watchlist_remove: (args) => {
+        const symbol =
+          typeof args.symbol === "string" ? args.symbol.toUpperCase() : "";
+        if (!symbol) return agentFail("symbol required");
+        watchlist = watchlist.filter((row) => row !== symbol);
+        return agentOk(`watch -${symbol}`);
+      },
+      set_agent_pause: (args) => {
+        // State already toggled in runtime before host call.
+        return agentOk(args.paused === true ? "paused" : "resumed");
+      },
+    });
+  }
+
   onMount(() => {
     loadOpenBetaBanner();
     loadPrefs();
@@ -1563,6 +1888,7 @@
     const panelsWarm = hydrateWidgetCache();
     prefsReady = true;
     createChartInstance();
+    wireAgentHost();
     void bootPhoenixMarketData();
     void fetchUsdFxRates().then((rates) => {
       fxRates = rates;
@@ -1673,6 +1999,7 @@
     }, 200);
 
     return () => {
+      unregisterAgentHost();
       phoenixStream?.close();
       window.cancelAnimationFrame(bookFrame);
       document.removeEventListener("visibilitychange", onVisible);
@@ -6354,7 +6681,7 @@
             displayTimezone={displayTimezone}
             {journalEntries}
             {journalToday}
-            {recapRead}
+            recapRead={viewRecapRead}
             {sessionPnlUsd}
             onwipe={wipeJournal}
           />
@@ -6533,8 +6860,8 @@
       {sessionPnlUsd}
       {sessionPnlPct}
       {equityValues}
-      {fundingRead}
-      {briefRead}
+      fundingRead={viewFundingRead}
+      briefRead={viewBriefRead}
       actionError={phoenixActionError}
       actionErrorDetail={phoenixActionErrorDetail}
       actionRetry={phoenixActionRetry}
@@ -6581,6 +6908,7 @@
           this={module.default}
           buildContext={buildDeskContextClosure}
           onRequestAuth={openAuthModal}
+          accountMode={paperMode ? "paper" : "live"}
         />
       {/await}
     {/if}

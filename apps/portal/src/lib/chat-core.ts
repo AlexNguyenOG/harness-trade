@@ -1,4 +1,6 @@
 import type { TaskClass } from "./chat-models";
+import type { AgentMode } from "./agent/modes";
+import { agentSystemPrompt } from "./agent/prompt";
 
 export type ChatRole = "user" | "assistant" | "tool";
 export type ChatMessage = { role: ChatRole; content: string };
@@ -148,19 +150,30 @@ export function toolToEdgePath(name: string): string | null {
   }
 }
 
+export type BuildMessagesOptions = {
+  /** When set, swap in the agent system prompt and enable action tools upstream. */
+  agentMode?: AgentMode;
+  paused?: boolean;
+};
+
 /** Assemble the DeepSeek messages array. */
 export function buildMessages(
   context: DeskContext,
   history: ChatMessage[],
   nowMs: number,
+  options?: BuildMessagesOptions,
 ): { role: string; content: string }[] {
+  const system =
+    options?.agentMode !== undefined
+      ? agentSystemPrompt(options.agentMode, options.paused === true)
+      : CHAT_SYSTEM_PROMPT;
   const contextMessage = capContextMessage(
     `DESK CONTEXT (as of ${new Date(nowMs).toISOString()}):\n${JSON.stringify(
       context,
     )}`,
   );
   return [
-    { role: "system", content: CHAT_SYSTEM_PROMPT },
+    { role: "system", content: system },
     { role: "user", content: contextMessage },
     ...capHistory(history),
   ];
