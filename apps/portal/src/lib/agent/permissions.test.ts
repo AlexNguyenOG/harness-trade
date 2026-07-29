@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolvePolicy, type PermissionRule } from "./permissions";
+import { type PermissionRule, resolvePolicy } from "./permissions";
 
 const emptyRules: PermissionRule[] = [];
 

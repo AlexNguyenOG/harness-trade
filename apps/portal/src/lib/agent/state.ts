@@ -1,19 +1,16 @@
 // Agent client state: mode, PAUSE, pending proposals, decision ledger.
 
 import { get, type Writable, writable } from "svelte/store";
-import type { AgentProposal } from "./proposals";
 import {
-  type LedgerEntry,
   appendLedger,
+  type LedgerEntry,
   loadLedger,
   makeLedgerId,
   saveLedger,
 } from "./ledger";
 import { type AgentMode, parseAgentMode } from "./modes";
-import {
-  type PermissionRule,
-  DEFAULT_PERMISSION_RULES,
-} from "./permissions";
+import { DEFAULT_PERMISSION_RULES, type PermissionRule } from "./permissions";
+import type { AgentProposal } from "./proposals";
 
 const AGENT_PREFS_KEY = "harness.agent.prefs.v1";
 
@@ -120,7 +117,9 @@ export function clearFinishedProposals(): void {
   }));
 }
 
-export function recordLedger(entry: Omit<LedgerEntry, "id"> & { id?: string }): void {
+export function recordLedger(
+  entry: Omit<LedgerEntry, "id"> & { id?: string },
+): void {
   agentState.update((state) => {
     const id = entry.id ?? makeLedgerId(entry.ts, state.ledger.length);
     const next = appendLedger(state.ledger, { ...entry, id });

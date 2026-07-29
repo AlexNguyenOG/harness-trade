@@ -20,6 +20,9 @@ export function isAgentMode(value: unknown): value is AgentMode {
   return value === "observe" || value === "ask" || value === "auto";
 }
 
-export function parseAgentMode(value: unknown, fallback: AgentMode = "ask"): AgentMode {
+export function parseAgentMode(
+  value: unknown,
+  fallback: AgentMode = "ask",
+): AgentMode {
   return isAgentMode(value) ? value : fallback;
 }

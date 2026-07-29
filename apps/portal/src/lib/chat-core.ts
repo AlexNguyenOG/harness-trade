@@ -1,6 +1,6 @@
-import type { TaskClass } from "./chat-models";
 import type { AgentMode } from "./agent/modes";
 import { agentSystemPrompt } from "./agent/prompt";
+import type { TaskClass } from "./chat-models";
 
 export type ChatRole = "user" | "assistant" | "tool";
 export type ChatMessage = { role: ChatRole; content: string };

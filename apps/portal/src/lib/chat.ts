@@ -3,11 +3,11 @@
 // proposals, applies client-side policy, auto-runs when mode=auto.
 
 import { get, type Writable, writable } from "svelte/store";
-import type { ChatMessage } from "./chat-core";
-import type { ChatModelChoice } from "./chat-models";
 import { buildProposals } from "./agent/proposals";
 import { runProposals } from "./agent/runtime";
 import { getAgentPolicy, setProposals } from "./agent/state";
+import type { ChatMessage } from "./chat-core";
+import type { ChatModelChoice } from "./chat-models";
 import { getPrivyAccessToken } from "./privy-auth";
 
 const CHAT_OPEN_KEY = "harness.chat.v1";

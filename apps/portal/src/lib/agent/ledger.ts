@@ -6,7 +6,14 @@ export type LedgerEntry = {
   ts: number;
   action: string;
   summary: string;
-  decision: "allow" | "ask" | "deny" | "accepted" | "rejected" | "auto" | "failed";
+  decision:
+    | "allow"
+    | "ask"
+    | "deny"
+    | "accepted"
+    | "rejected"
+    | "auto"
+    | "failed";
   reason: string;
   mode: string;
   accountMode: "live" | "paper";
@@ -63,7 +70,10 @@ export function saveLedger(
 ): void {
   if (!storage) return;
   try {
-    storage.setItem(AGENT_LEDGER_KEY, JSON.stringify(entries.slice(-AGENT_LEDGER_CAP)));
+    storage.setItem(
+      AGENT_LEDGER_KEY,
+      JSON.stringify(entries.slice(-AGENT_LEDGER_CAP)),
+    );
   } catch {
     // best-effort
   }

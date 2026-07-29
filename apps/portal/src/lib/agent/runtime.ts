@@ -1,16 +1,16 @@
 // Run proposals against policy + host. Used after chat returns actions.
 
+import { get } from "svelte/store";
+import { executeAgentAction } from "./host";
 import type { AgentProposal } from "./proposals";
 import { partitionProposals } from "./proposals";
-import { executeAgentAction } from "./host";
 import {
+  agentState,
   getAgentPolicy,
   recordLedger,
   setAgentPaused,
   updateProposal,
 } from "./state";
-import { get } from "svelte/store";
-import { agentState } from "./state";
 
 export type RunOptions = {
   accountMode: "live" | "paper";
@@ -28,7 +28,10 @@ export async function runProposals(
   const { auto, needsAccept, denied } = partitionProposals(proposals);
 
   for (const proposal of denied) {
-    updateProposal(proposal.id, { status: "skipped", error: proposal.verdict.reason });
+    updateProposal(proposal.id, {
+      status: "skipped",
+      error: proposal.verdict.reason,
+    });
     recordLedger({
       ts: Date.now(),
       action: proposal.name,
@@ -93,7 +96,10 @@ export async function acceptProposal(
   await runProposals([proposal], { accountMode, onlyIds: [id] });
 }
 
-export async function rejectProposal(id: string, accountMode: "live" | "paper"): Promise<void> {
+export async function rejectProposal(
+  id: string,
+  accountMode: "live" | "paper",
+): Promise<void> {
   const state = get(agentState);
   const proposal = state.proposals.find((row) => row.id === id);
   if (!proposal) return;
@@ -109,7 +115,9 @@ export async function rejectProposal(id: string, accountMode: "live" | "paper"):
   });
 }
 
-export async function acceptAllPending(accountMode: "live" | "paper"): Promise<void> {
+export async function acceptAllPending(
+  accountMode: "live" | "paper",
+): Promise<void> {
   const state = get(agentState);
   const ids = state.proposals
     .filter(

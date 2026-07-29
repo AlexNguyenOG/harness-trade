@@ -124,7 +124,8 @@ export const AGENT_ACTION_META: readonly AgentActionMeta[] = [
     name: "place_spot_order",
     kind: "write",
     risk: "high",
-    description: "Submit a spot market or limit order for the active spot asset.",
+    description:
+      "Submit a spot market or limit order for the active spot asset.",
     parameters: {
       type: "object",
       properties: {
@@ -244,7 +245,8 @@ export const AGENT_ACTION_META: readonly AgentActionMeta[] = [
     name: "reverse_position",
     kind: "write",
     risk: "high",
-    description: "Close the position and open the opposite side at the same notional.",
+    description:
+      "Close the position and open the opposite side at the same notional.",
     parameters: {
       type: "object",
       properties: {

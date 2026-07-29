@@ -10,11 +10,11 @@ import {
   CHAT_TOOLS,
   type ChatMessage,
   type ChatRole,
-  type ToolDef,
   capHistory,
   classifyTaskClass,
   dailyAllowed,
   groundedOrNull,
+  type ToolDef,
   toolToEdgePath,
 } from "$lib/chat-core";
 import {
@@ -217,7 +217,11 @@ async function readChatBody(request: Request): Promise<ChatRequestBody | null> {
     if (!isAgentMode(body.agentMode)) return null;
     agentMode = body.agentMode;
   }
-  if ("paused" in body && body.paused !== undefined && typeof body.paused !== "boolean") {
+  if (
+    "paused" in body &&
+    body.paused !== undefined &&
+    typeof body.paused !== "boolean"
+  ) {
     return null;
   }
   return {
@@ -306,7 +310,11 @@ async function runToolLoop(
     paused?: boolean;
   },
   config: ChatModelConfig,
-): Promise<{ reply: string | null; toolFacts: string[]; actions: QueuedAction[] }> {
+): Promise<{
+  reply: string | null;
+  toolFacts: string[];
+  actions: QueuedAction[];
+}> {
   const agentEnabled = input.agentMode !== undefined;
   const tools: ToolDef[] = agentEnabled
     ? [...CHAT_TOOLS, ...AGENT_ACTION_TOOLS]

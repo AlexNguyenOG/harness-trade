@@ -33,7 +33,11 @@ export type RawToolCall = {
 export function parseToolArgs(argumentsJson: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(argumentsJson) as unknown;
-    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    ) {
       return parsed as Record<string, unknown>;
     }
   } catch {
@@ -92,7 +96,9 @@ export function summarizeAction(
     case "watchlist_remove":
       return `Watchlist − ${symbol ?? "?"}`;
     case "set_agent_pause":
-      return args.paused === true ? "Engage money-PAUSE" : "Release money-PAUSE";
+      return args.paused === true
+        ? "Engage money-PAUSE"
+        : "Release money-PAUSE";
     default:
       return name;
   }
@@ -118,11 +124,9 @@ export function buildProposals(
         : typeof args.amountUsd === "number"
           ? args.amountUsd
           : null;
-    const leverage =
-      typeof args.leverage === "number" ? args.leverage : null;
+    const leverage = typeof args.leverage === "number" ? args.leverage : null;
     const symbol = typeof args.symbol === "string" ? args.symbol : null;
-    const side =
-      args.side === "buy" || args.side === "sell" ? args.side : null;
+    const side = args.side === "buy" || args.side === "sell" ? args.side : null;
     const verdict = resolvePolicy(call.name, {
       mode: policy.mode,
       paused: policy.paused,

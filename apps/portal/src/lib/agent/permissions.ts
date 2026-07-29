@@ -68,7 +68,11 @@ export function resolvePolicy(
   const kind: AgentActionKind = meta?.kind ?? "write";
   const risk: AgentRisk = meta?.risk ?? "high";
 
-  if (ctx.paused && isWriteAction(actionName) && actionName !== "set_agent_pause") {
+  if (
+    ctx.paused &&
+    isWriteAction(actionName) &&
+    actionName !== "set_agent_pause"
+  ) {
     return { decision: "deny", reason: "money-PAUSE engaged" };
   }
 
@@ -79,7 +83,10 @@ export function resolvePolicy(
       return { decision: "deny", reason: "observe mode is read-only" };
     }
     // Engaging pause is always free; releasing pause asks unless auto.
-    return { decision: ctx.mode === "auto" ? "allow" : "ask", reason: "pause control" };
+    return {
+      decision: ctx.mode === "auto" ? "allow" : "ask",
+      reason: "pause control",
+    };
   }
 
   if (kind === "write" && ctx.mode === "observe") {
@@ -140,15 +147,13 @@ export function resolvePolicy(
   return { decision: "ask", reason: "ask mode" };
 }
 
-function matchRules(
-  actionName: string,
-  ctx: PolicyContext,
-): PermissionRule[] {
+function matchRules(actionName: string, ctx: PolicyContext): PermissionRule[] {
   const symbol = (ctx.symbol ?? "*").toUpperCase();
   const side = ctx.side ?? null;
   return ctx.rules.filter((rule) => {
     if (rule.action !== "*" && rule.action !== actionName) return false;
-    if (rule.market !== "*" && rule.market.toUpperCase() !== symbol) return false;
+    if (rule.market !== "*" && rule.market.toUpperCase() !== symbol)
+      return false;
     if (rule.side !== "*" && side !== null && rule.side !== side) return false;
     if (
       rule.maxNotionalUsd != null &&

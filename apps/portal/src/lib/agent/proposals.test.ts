@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { buildProposals, partitionProposals, summarizeAction } from "./proposals";
+import {
+  buildProposals,
+  partitionProposals,
+  summarizeAction,
+} from "./proposals";
 
 describe("buildProposals", () => {
   test("builds allow proposals in auto mode", () => {
