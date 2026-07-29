@@ -695,6 +695,10 @@
   // breakpoint where the grid collapses, so markup and CSS agree. The tape
   // shares the ladder slot up top (all three don't fit vertically).
   let stackedBook = false;
+  // Agent dock open → compress terminal into the narrow/responsive layout
+  // (tabbed book/ticket, single-column chart stack) in the remaining width.
+  $: chatOpen = $chatState.open;
+  $: layoutStackedBook = stackedBook && !chatOpen;
   // Chart footer density: measured against the chart panel width so shrinking
   // the window (or the book eating space) swaps the long date range out
   // before it crushes the controls.
@@ -1063,7 +1067,7 @@
   $: spread = asks[0] && bids[0] ? asks[0].price - bids[0].price : 0;
   $: spreadBps = latestPrice && latestPrice > 0 ? (spread / latestPrice) * 10_000 : 0;
   $: spreadPercent = latestPrice && latestPrice > 0 ? (spread / latestPrice) * 100 : 0;
-  $: ladderLevelCap = stackedBook
+  $: ladderLevelCap = layoutStackedBook
     ? BOOK_LADDER_LEVELS_STACKED
     : BOOK_LADDER_LEVELS;
   $: visibleAskLevels = asks.slice(0, ladderLevelCap).reverse();
@@ -1145,7 +1149,7 @@
     fundingPercent,
     tradeOpen,
     perpsMode: tradeMode === "perps",
-    stackedBook,
+    stackedBook: layoutStackedBook,
     tradeTab: bookTab === "trade",
     hasAuthority: Boolean(phoenixAuthority) || paperMode,
     stateKnown: phoenixStateKnown,
@@ -6188,7 +6192,11 @@
 
 <svelte:window onkeydown={onGlobalKeydown} />
 
-<main class="terminal-shell">
+<main
+  class="terminal-shell"
+  class:chat-open={chatOpen}
+  style={`--topbar-h: ${topbarHeight || 48}px; --agent-dock-w: min(42vw, 28rem);`}
+>
   <a class="skip-link" href="#terminal-content">Skip to terminal content</a>
 
   <Topbar
@@ -6270,8 +6278,8 @@
   <section
     id="terminal-content"
     class="dashboard"
-    class:chat-open={$chatState.open}
-    style={`--anchor-top: ${(stackedBook ? topbarHeight : 0) + marketRailHeight}px;`}
+    class:chat-open={chatOpen}
+    style={`--anchor-top: ${(layoutStackedBook ? topbarHeight : 0) + marketRailHeight}px;`}
   >
     <!-- Chart column: chart stacked over the dock (Hyperliquid posture) —
          the dock's height is independent of the taller ticket rail. -->
@@ -6715,7 +6723,7 @@
     </div>
 
     <section id="section-book" class="panel orderbook-panel">
-      {#if stackedBook}
+      {#if layoutStackedBook}
         <!-- Desktop: ticket + ladder stack (Hyperliquid order) — the ticket
              owns the top of the rail so entry controls are always visible;
              the book/tape reads below it. The tape shares the ladder slot
@@ -7164,7 +7172,7 @@
     {lastTradeSignature}
     {txStageText}
     {tradeOpen}
-    {stackedBook}
+    stackedBook={layoutStackedBook}
     onsubmit={onPerpSubmitClick}
     onopenauth={openAuthModal}
     onopenfunds={openPhoenixFunding}
@@ -7182,6 +7190,31 @@
       linear-gradient(180deg, rgba(255, 77, 151, 0.04), transparent 28rem),
       var(--paper);
     color: var(--ink);
+  }
+
+  /* Agent dock open: leave a right gutter for the full-height panel and
+     compress the terminal like the ≤1100px responsive layout. */
+  .terminal-shell.chat-open {
+    --agent-dock-w: min(42vw, 28rem);
+  }
+
+  .terminal-shell.chat-open .dashboard,
+  .terminal-shell.chat-open .terminal-notice {
+    margin-right: var(--agent-dock-w);
+  }
+
+  /* Market rail shrinks with the dashboard so chrome doesn't run under dock. */
+  .terminal-shell.chat-open :global(.ticker-rail) {
+    margin-right: var(--agent-dock-w);
+  }
+
+  /* On already-narrow viewports the agent is a full sheet — no gutter. */
+  @media (max-width: 1100px) {
+    .terminal-shell.chat-open .dashboard,
+    .terminal-shell.chat-open .terminal-notice,
+    .terminal-shell.chat-open :global(.ticker-rail) {
+      margin-right: 0;
+    }
   }
 
   .skip-link {
@@ -7371,15 +7404,29 @@
     padding: clamp(0.75rem, 1.4vw, 1.15rem);
   }
 
-  /* Side-chat dock (PRD #563, WP3): when the panel is open the main grid
-     gains a 380px right track for the dock while the existing 12-col content
-     stays intact. Closed = class absent = repeat(12, …) unchanged, so the
-     layout is byte-identical. Below the dock's mobile breakpoint the panel
-     goes fixed-sheet, so no track is reserved there. */
-  @media (min-width: 1101px) {
-    .dashboard.chat-open {
-      grid-template-columns: repeat(12, minmax(0, 1fr)) 380px;
-    }
+  /* Agent dock reserves space via margin-right on .terminal-shell.chat-open
+     (see above) — no extra grid track. When open, force the narrow layout
+     so chart/book stack in the remaining width. */
+  .dashboard.chat-open .chart-col {
+    display: contents;
+  }
+
+  .dashboard.chat-open .chart-panel,
+  .dashboard.chat-open .orderbook-panel {
+    grid-column: 1 / -1;
+  }
+
+  .dashboard.chat-open .chart-panel {
+    height: clamp(22rem, 48vh, 34rem);
+  }
+
+  .dashboard.chat-open .orderbook-panel {
+    height: auto;
+    max-height: 28rem;
+  }
+
+  .dashboard.chat-open .macro-panel {
+    grid-column: span 6;
   }
 
   .chart-panel {
