@@ -54,6 +54,7 @@
     freeCollateralUsd,
     flattenArmed,
     flattenBusy,
+    flattenEstPnl = null,
     bidSweepSymbols,
     askSweepSymbols,
     cancelSweepBusy,
@@ -99,6 +100,8 @@
     freeCollateralUsd: number;
     flattenArmed: boolean;
     flattenBusy: boolean;
+    /** Aggregate est. P&L if flatten confirms now (shown while armed). */
+    flattenEstPnl?: number | null;
     bidSweepSymbols: string[];
     askSweepSymbols: string[];
     cancelSweepBusy: boolean;
@@ -171,10 +174,25 @@
         class:armed={flattenArmed}
         type="button"
         disabled={flattenBusy}
+        title={flattenArmed && flattenEstPnl !== null && flattenEstPnl !== undefined
+          ? `Est. P&L ${flattenEstPnl >= 0 ? "+" : ""}${flattenEstPnl.toFixed(2)}`
+          : "Close all positions"}
         onclick={onflatten}
       >
         {#if flattenBusy}<span class="spinner" aria-hidden="true"></span>{/if}
-        {flattenBusy ? "Flattening…" : flattenArmed ? "Confirm flatten" : "FLATTEN"}
+        {#if flattenBusy}
+          Flattening…
+        {:else if flattenArmed}
+          Confirm{#if flattenEstPnl !== null && flattenEstPnl !== undefined}
+            {" "}{formatDisplayMoneySigned(
+              flattenEstPnl,
+              displayCurrency,
+              fxRate,
+              2,
+            )}{/if}
+        {:else}
+          FLATTEN
+        {/if}
       </button>
     {/if}
     {#if paperMode && onresetpaper}

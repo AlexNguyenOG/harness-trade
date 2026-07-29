@@ -8,6 +8,7 @@
   import AuthModal from "./components/AuthModal.svelte";
   import BookLadder from "./components/BookLadder.svelte";
   import CheatSheetModal from "./components/CheatSheetModal.svelte";
+  import ClosePreviewModal from "./components/ClosePreviewModal.svelte";
   import CommandPalette from "./components/CommandPalette.svelte";
   import FundingWizard from "./components/FundingWizard.svelte";
   import FundsModal from "./components/FundsModal.svelte";
@@ -1215,19 +1216,19 @@
   // ── Day P&L (device-local equity history) ──────────────────────────
   // Sampled on the trader refresh; baseline = first sample of the UTC day,
   // shifted by in-app deposits/withdrawals at their confirm sites.
-  // PAPER has no flow-adjusted daily baseline yet: suppress the live wallet's
-  // equity history entirely rather than subtracting the simulated ledger's
-  // equity from a live baseline (a dishonest mixed number). A dedicated paper
-  // daily baseline is a deferred follow-up.
-  $: equityPoints =
-    !paperMode && phoenixAuthority
-      ? $equityHistory[phoenixAuthority] ?? []
-      : [];
+  // PAPER uses a dedicated "paper" wallet key so simulated equity never
+  // poisons the live baseline (and paper Day P&L still works).
+  const PAPER_EQUITY_KEY = "paper";
+  $: equityAuthority = paperMode
+    ? PAPER_EQUITY_KEY
+    : phoenixAuthority || null;
+  $: equityPoints = equityAuthority
+    ? $equityHistory[equityAuthority] ?? []
+    : [];
   $: equityValues = equityPoints.map((point) => point.equity);
-  $: equityBaseline =
-    !paperMode && phoenixAuthority
-      ? $equityBaselines[phoenixAuthority] ?? null
-      : null;
+  $: equityBaseline = equityAuthority
+    ? $equityBaselines[equityAuthority] ?? null
+    : null;
   $: sessionPnlUsd = equityBaseline
     ? accountEquityUsd - equityBaseline.equity
     : null;
@@ -1235,6 +1236,10 @@
     equityBaseline && equityBaseline.equity > 0 && sessionPnlUsd !== null
       ? (sessionPnlUsd / equityBaseline.equity) * 100
       : null;
+  // PAPER day-P&L sample (60s throttle inside recordEquitySample).
+  $: if (browser && paperMode) {
+    recordEquitySample(PAPER_EQUITY_KEY, accountEquityUsd);
+  }
   // Market context attached to every money event — the model's "state".
   function marketContext(): Record<string, unknown> {
     return {
@@ -1263,7 +1268,7 @@
       openOrders: perpOpenOrders,
       // Paper has no flow-adjusted daily baseline yet — null is honest;
       // mixing the simulator with a live wallet baseline is not.
-      dayPnlUsd: paperMode ? null : sessionPnlUsd,
+      dayPnlUsd: sessionPnlUsd,
       equityUsd: accountEquityUsd,
       monitorRows: markets.map((market) => ({
         symbol: market.symbol,
@@ -2999,6 +3004,14 @@
   function resetPaperAccount(): void {
     paperLedger.set(resetPaperLedger());
     pendingOrder = null;
+    // Pin day baseline to the restored starting balance so the wipe
+    // doesn't read as a huge Day P&L loss.
+    const day = new Date().toISOString().slice(0, 10);
+    equityBaselines.update((baselines) => ({
+      ...baselines,
+      [PAPER_EQUITY_KEY]: { day, equity: PAPER_STARTING_BALANCE },
+    }));
+    recordEquitySample(PAPER_EQUITY_KEY, PAPER_STARTING_BALANCE);
     alertsStore.pushToast({
       ts: Date.now(),
       title: "Paper reset",
@@ -3008,6 +3021,7 @@
 
   function topUpPaperAccount(amount = 1_000): void {
     paperLedger.set(topUpPaperCash($paperLedger, amount));
+    shiftEquityBaseline(PAPER_EQUITY_KEY, amount);
     alertsStore.pushToast({
       ts: Date.now(),
       title: "Paper top-up",
@@ -3789,6 +3803,51 @@
   let armedHotkey: { key: "c" | "x"; until: number } | null = null;
   $: if (armedHotkey && nowMs > armedHotkey.until) armedHotkey = null;
 
+  // Close preview: Close / partial / hotkey-C opens a confirm with
+  // entry → mark + est. P&L before sending.
+  let closePreview: {
+    position: PhoenixPosition;
+    fraction: number;
+  } | null = null;
+  $: flattenEstPnl = enrichedPositions.reduce(
+    (sum, position) => sum + (position.unrealizedPnl ?? 0),
+    0,
+  );
+
+  function openClosePreview(position: PhoenixPosition, fraction = 1): void {
+    closePreview = { position, fraction };
+  }
+
+  function confirmClosePreview(): void {
+    const preview = closePreview;
+    if (!preview) return;
+    closePreview = null;
+    if (preview.fraction < 1) {
+      void closePhoenixPositionFraction(preview.position, preview.fraction);
+      return;
+    }
+    void closePhoenixPosition(
+      preview.position.symbol,
+      preview.position.size,
+      preview.position.subaccountIndex,
+    );
+  }
+
+  async function reconnectMarketData(): Promise<void> {
+    alertsStore.pushToast({
+      ts: Date.now(),
+      title: "Reconnecting",
+      body: "Retrying market stream + RPC…",
+    });
+    streamHealth = "connecting";
+    await probeRpc();
+    if (tradeMode === "perps" && selectedSymbol) {
+      startPhoenixStream(selectedSymbol);
+    } else {
+      void bootPhoenixMarketData();
+    }
+  }
+
   // Status-line model: every field already derived here; the tx stage text
   // is pre-rendered because txStageText stays with the signing pipeline
   // (the ticket's order-stage readout shares it).
@@ -3812,6 +3871,7 @@
     paperMode,
     equityUsd: accountEquityUsd,
     upnlUsd: accountUpnlUsd,
+    sessionPnlUsd,
     freeCollateralUsd: phoenixCollateral,
     fundingPercent,
     walletAddress: $privyAuth.walletAddress ?? "",
@@ -5676,7 +5736,8 @@
       !paperFundsOpen &&
       !settingsOpen &&
       !paletteOpen &&
-      !cheatOpen
+      !cheatOpen &&
+      !closePreview
     ) {
       const ticketKey = event.key.toLowerCase();
       if (ticketKey === "b" || ticketKey === "s") {
@@ -5700,7 +5761,8 @@
       paperFundsOpen ||
       settingsOpen ||
       paletteOpen ||
-      cheatOpen
+      cheatOpen ||
+      closePreview
     ) {
       return;
     }
@@ -5743,15 +5805,11 @@
         resetChartView();
         break;
       case "c": {
-        // Two-stage market close of the selected symbol's position.
+        // Two-stage market close of the selected symbol's position → preview.
         if (tradeMode !== "perps" || !selectedPosition) break;
         if (armedHotkey?.key === "c" && Date.now() < armedHotkey.until) {
           armedHotkey = null;
-          void closePhoenixPosition(
-            selectedPosition.symbol,
-            selectedPosition.size,
-            selectedPosition.subaccountIndex,
-          );
+          openClosePreview(selectedPosition, 1);
         } else {
           armedHotkey = { key: "c", until: Date.now() + 3_000 };
         }
@@ -5978,6 +6036,9 @@
         </aside>
 
         <div class="chart-canvas-shell">
+          {#if paperMode}
+            <div class="paper-watermark" aria-hidden="true">PAPER</div>
+          {/if}
           <div class="chart-overlay">
             <div class="chart-symbol-line">
               {#if tradeMode === "spot" && spotAsset}
@@ -6499,20 +6560,16 @@
       ondeposit={openFunds}
       onselectsymbol={chooseMonitorRow}
       onshare={(position) => sharePhoenixPosition(position, marketMids)}
-      onclose={(position) =>
-        closePhoenixPosition(
-          position.symbol,
-          position.size,
-          position.subaccountIndex,
-        )}
+      onclose={(position) => openClosePreview(position, 1)}
       onclosepartial={(position, fraction) =>
-        closePhoenixPositionFraction(position, fraction)}
+        openClosePreview(position, fraction)}
       oncancelorder={(order) => cancelPhoenixOrderById(order)}
       oncancelside={(side) => cancelAllPhoenixOrdersOnSide(side)}
       onflatten={onFlattenClick}
       onmarginopen={openMarginAdd}
       onmarginsubmit={(position) => submitMarginAdd(position)}
       onresetpaper={resetPaperAccount}
+      {flattenEstPnl}
     />
 {/snippet}
 
@@ -6532,6 +6589,7 @@
     status={statusModel}
     onshowshortcuts={() => (cheatOpen = true)}
     onjumptopositions={() => scrollToSection("section-perp")}
+    onreconnect={() => void reconnectMarketData()}
   />
 </main>
 
@@ -6547,6 +6605,24 @@
 
 {#if ackOpen}
   <AckModal onagree={onAckAgree} onclose={() => { ackOpen = false; pendingAckAction = null; }} />
+{/if}
+
+{#if closePreview}
+  {@const previewPos = closePreview.position}
+  <ClosePreviewModal
+    position={previewPos}
+    mark={marketMids[previewPos.symbol] ??
+      (previewPos.symbol === selectedSymbol ? latestPrice : null)}
+    fraction={closePreview.fraction}
+    {paperMode}
+    {displayCurrency}
+    fxRate={displayFxRate}
+    busy={closingKeys.has(
+      `${previewPos.symbol}:${previewPos.subaccountIndex}`,
+    )}
+    onconfirm={confirmClosePreview}
+    onclose={() => (closePreview = null)}
+  />
 {/if}
 
 {#if wizardOpen}
@@ -6606,12 +6682,7 @@
     {watchlist}
     positions={enrichedPositions}
     openOrders={perpOpenOrders}
-    oncloseposition={(position) =>
-      void closePhoenixPosition(
-        position.symbol,
-        position.size,
-        position.subaccountIndex,
-      )}
+    oncloseposition={(position) => openClosePreview(position, 1)}
     oncancelorders={(symbol) => void cancelSymbolBookOrders(symbol)}
     onflatten={onFlattenClick}
     repeatLast={lastOrderIntent
@@ -7150,6 +7221,21 @@
     min-height: 0;
     background: var(--chart-bg);
     overflow: hidden;
+  }
+
+  .paper-watermark {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    color: var(--accent);
+    font-size: clamp(3.5rem, 12vw, 7rem);
+    font-weight: 900;
+    letter-spacing: 0.18em;
+    opacity: 0.07;
+    user-select: none;
   }
 
   .chart-overlay {
