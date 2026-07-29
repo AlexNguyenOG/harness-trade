@@ -30,6 +30,13 @@ export const RESERVED_SLUGS = new Set([
   "robots.txt",
   "llms.txt",
   "favicon.ico",
+  // Open WebUI (and other local tools) share localhost:3000 in some setups
+  // and soft-navigate to /error|/auth — those must not hit the asset loader.
+  "error",
+  "auth",
+  "admin",
+  "signin",
+  "signup",
 ]);
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;

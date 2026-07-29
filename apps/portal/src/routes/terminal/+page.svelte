@@ -739,7 +739,7 @@
   let pendingSpotAssetId: string | null = null;
 
   // Watchlist: starred symbols (uppercase), persisted in prefs.
-  // Lives in the bottom dock (Desk / Journal / Alerts / Watch).
+  // Lives in the bottom dock (Positions / Journal / Alerts / Watch).
   let watchlist: string[] = [];
   // Screener controls (persisted; screener panel retired but prefs kept).
   let screenSort: "movers" | "volume" | "cap" = "movers";
@@ -945,8 +945,9 @@
       wizardPollTimer = null;
     }
   }
-  // Bottom dock (desk / journal / alerts / watch).
-  let dockTab: "desk" | "journal" | "alerts" | "watch" = "desk";
+  // Bottom dock (positions / journal / alerts / watch).
+  // Topbar "Desk" is the AI chat — different surface, deliberately.
+  let dockTab: "positions" | "journal" | "alerts" | "watch" = "positions";
   const { alertLog } = alertsStore;
   // Meme safety rails: SPL authority checks per selected mint (cached —
   // authorities effectively never un-revoke).
@@ -6243,18 +6244,18 @@
       </div>
     </section>
 
-    <!-- Bottom dock: risk never leaves the screen — desk/journal/alerts/watch
+    <!-- Bottom dock: risk never leaves the screen — positions/journal/alerts/watch
          tabs span the full width directly under the chart row. -->
     <section class="panel dock" aria-label="Trading desk dock">
       <div class="dock-tabs" role="tablist" aria-label="Dock views">
         <button
           role="tab"
-          aria-selected={dockTab === "desk"}
-          class:active={dockTab === "desk"}
+          aria-selected={dockTab === "positions"}
+          class:active={dockTab === "positions"}
           type="button"
-          onclick={() => (dockTab = "desk")}
+          onclick={() => (dockTab = "positions")}
         >
-          Desk
+          Positions
         </button>
         <button
           role="tab"

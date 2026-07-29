@@ -30,7 +30,7 @@ export const MARKETS_MAX_AGE = 24 * 60 * 60_000;
 export const ALERT_LOG_KEY = "trader-ralph-alert-log";
 export const ONBOARD_KEY = "trader-ralph-terminal/phx-referral/v2";
 
-// Draggable dashboard: chart + book stay anchored; desk/journal live in
+// Draggable dashboard: chart + book stay anchored; positions/journal live in
 // the bottom dock. Markets / spot / screener / events / watch panels are
 // retired from the grid (watchlist is a topbar drawer). Macro research
 // still folds into the macro drawer. mergeLayout drops retired ids from
@@ -60,7 +60,7 @@ export type TerminalPrefs = {
   tradeAmount: string;
   tradeRiskUsd: string;
   tradeLeverage: number;
-  dockTab: "desk" | "journal" | "alerts" | "watch";
+  dockTab: "positions" | "journal" | "alerts" | "watch";
   macroOpen: boolean;
   /** Structure-level chart lines (PDH/PDL + swing pivots) — default ON. */
   showLevels: boolean;
@@ -174,12 +174,14 @@ export function parsePrefs(raw: string | null): Partial<TerminalPrefs> {
     prefs.tradeLeverage = data.tradeLeverage;
   }
   if (
-    data.dockTab === "desk" ||
+    data.dockTab === "positions" ||
     data.dockTab === "journal" ||
     data.dockTab === "alerts" ||
-    data.dockTab === "watch"
+    data.dockTab === "watch" ||
+    // Legacy label from before the Positions rename (topbar Desk = chat).
+    data.dockTab === "desk"
   ) {
-    prefs.dockTab = data.dockTab;
+    prefs.dockTab = data.dockTab === "desk" ? "positions" : data.dockTab;
   }
   if (typeof data.macroOpen === "boolean") prefs.macroOpen = data.macroOpen;
   if (typeof data.showLevels === "boolean") prefs.showLevels = data.showLevels;
@@ -224,7 +226,7 @@ export function persistPrefs(
   _tradeAmount: string,
   _tradeRiskUsd: string,
   _tradeLeverage: number,
-  _dockTab: "desk" | "journal" | "alerts" | "watch",
+  _dockTab: "positions" | "journal" | "alerts" | "watch",
   _macroOpen: boolean,
   _showLevels: boolean,
   _rays: Record<string, number[]>,

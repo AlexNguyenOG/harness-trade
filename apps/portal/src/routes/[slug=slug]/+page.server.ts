@@ -12,7 +12,9 @@ import type { PageServerLoad } from "./$types";
 export const config = { isr: { expiration: 60 } };
 
 export const load: PageServerLoad = async ({ params }) => {
-  const asset = await findBySlug(params.slug);
+  // Catalog/API failures must not surface as a generic 500 on every unknown
+  // path (e.g. leftover /error navigations from other localhost:3000 apps).
+  const asset = await findBySlug(params.slug).catch(() => null);
   if (!asset) error(404, "Unknown asset");
 
   const [bundle, perpSymbols, catalog] = await Promise.all([
