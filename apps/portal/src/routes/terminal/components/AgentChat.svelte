@@ -557,15 +557,6 @@
     background: var(--surface-2);
   }
 
-  .layout-dock .picker {
-    flex: 1 1 14rem;
-  }
-
-  .layout-dock .picker button {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-
   .picker button {
     box-sizing: border-box;
     color: var(--muted);

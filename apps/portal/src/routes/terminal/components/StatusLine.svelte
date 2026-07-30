@@ -355,10 +355,4 @@
       transition: none !important;
     }
   }
-
-  @media (max-width: 1100px) {
-    .status-line {
-      right: 0;
-    }
-  }
 </style>
