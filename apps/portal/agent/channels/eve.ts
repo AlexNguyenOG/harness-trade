@@ -1,9 +1,9 @@
-import { eveChannel } from "eve/channels/eve";
 import {
+  type AuthFn,
   UnauthenticatedError,
   withAuthChallenges,
-  type AuthFn,
 } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
 import { verifyPrivyToken } from "../lib/privy-auth";
 
 function requestMode(

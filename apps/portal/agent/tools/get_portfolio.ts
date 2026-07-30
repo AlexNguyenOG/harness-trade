@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { getPortfolio } from "../lib/trading";
 import { transactionLedger } from "../lib/ledger";
+import { getPortfolio } from "../lib/trading";
 
 export default defineTool({
   description:

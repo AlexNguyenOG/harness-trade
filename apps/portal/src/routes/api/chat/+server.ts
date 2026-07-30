@@ -400,7 +400,12 @@ async function runToolLoop(
     if (toolCalls.length === 0) {
       return response.content.trim()
         ? { reply: response.content.trim(), toolFacts, actions }
-        : { reply: lastContent.trim() || null, toolFacts, actions, providerError };
+        : {
+            reply: lastContent.trim() || null,
+            toolFacts,
+            actions,
+            providerError,
+          };
     }
 
     messages.push({

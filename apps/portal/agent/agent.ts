@@ -7,10 +7,6 @@ export default defineAgent({
   reasoning: "medium",
   compaction: { thresholdPercent: 0.78 },
   build: {
-    externalDependencies: [
-      "@ellipsis-labs/rise",
-      "@solana/web3.js",
-      "buffer",
-    ],
+    externalDependencies: ["@ellipsis-labs/rise", "@solana/web3.js", "buffer"],
   },
 });

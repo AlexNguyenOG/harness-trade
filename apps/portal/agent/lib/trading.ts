@@ -1,9 +1,10 @@
 import {
   PublicKey,
-  VersionedTransaction,
   type TransactionInstruction,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import type { ToolContext } from "eve/tools";
+import { SOL_MINT, USDC_MINT } from "../../src/lib/funding";
 import {
   buildAddIsolatedMarginIxs,
   buildCancelAllIxs,
@@ -18,12 +19,11 @@ import {
   type PhoenixPosition,
   type PhoenixSide,
 } from "../../src/lib/phoenix-trade";
-import { SOL_MINT, USDC_MINT } from "../../src/lib/funding";
 import { appendTransaction } from "./ledger";
 import {
   getServerWallet,
-  signAndSendWithServerWallet,
   type ServerWalletProfile,
+  signAndSendWithServerWallet,
 } from "./server-wallet";
 
 const JUPITER_API = "https://lite-api.jup.ag";
@@ -55,7 +55,10 @@ function rpcUrl(): string {
 }
 
 function normalizeSymbol(value: string): string {
-  const symbol = value.trim().toUpperCase().replace(/-PERP$/, "");
+  const symbol = value
+    .trim()
+    .toUpperCase()
+    .replace(/-PERP$/, "");
   if (!/^[A-Z0-9._-]{1,16}$/.test(symbol)) {
     throw new Error("market-symbol-invalid");
   }
@@ -259,10 +262,7 @@ export async function executeTrade(
   ctx: ToolContext,
 ): Promise<TradeResult> {
   if (input.operation === "place_spot") return placeSpot(input, ctx);
-  if (
-    input.operation === "cancel_order" &&
-    input.venue === "spot"
-  ) {
+  if (input.operation === "cancel_order" && input.venue === "spot") {
     return cancelSpot(input.orderId, ctx);
   }
   const { wallet, trader } = await serverContext(ctx);
@@ -317,9 +317,12 @@ export async function executeTrade(
       await buildCancelSingleOrderIxs(wallet.address, order),
       "cancel-perp-order",
     );
-    return result(ctx, input.operation, `Cancelled perp order ${input.orderId}`, [
-      signature,
-    ]);
+    return result(
+      ctx,
+      input.operation,
+      `Cancelled perp order ${input.orderId}`,
+      [signature],
+    );
   }
 
   if (input.operation === "cancel_symbol_orders") {
@@ -470,7 +473,8 @@ export async function executeTrade(
   );
   const notional = Math.abs(
     position.positionValue ??
-      position.size * (position.entryPrice ?? (await currentPhoenixPrice(position.symbol))),
+      position.size *
+        (position.entryPrice ?? (await currentPhoenixPrice(position.symbol))),
   );
   const leverage =
     position.marginUsd && position.marginUsd > 0
@@ -596,9 +600,7 @@ async function placeSpot(
       ),
       restrictIntermediateTokens: "true",
     });
-    const quoteResponse = await fetch(
-      `${JUPITER_API}/swap/v1/quote?${params}`,
-    );
+    const quoteResponse = await fetch(`${JUPITER_API}/swap/v1/quote?${params}`);
     if (!quoteResponse.ok) {
       throw new Error(`jupiter-quote-${quoteResponse.status}`);
     }

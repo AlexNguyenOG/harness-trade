@@ -1,4 +1,4 @@
-import { defineTool, type ApprovalContext } from "eve/tools";
+import { type ApprovalContext, defineTool } from "eve/tools";
 import { z } from "zod";
 import { transactionApproval } from "../lib/auth";
 import { executeTrade } from "../lib/trading";
