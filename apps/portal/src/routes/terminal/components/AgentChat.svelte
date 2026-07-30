@@ -29,6 +29,8 @@
     getPrivyAccessToken,
     privyAuth,
   } from "$lib/privy-auth";
+  import { projectPriceQuote } from "$lib/agent/price-presentation";
+  import PriceQuoteCard from "./PriceQuoteCard.svelte";
 
   let {
     buildContext,
@@ -356,116 +358,125 @@
             {#if part.type === "text" && partText(part)}
               <span>{partText(part)}</span>
             {:else if isDynamicToolPart(part)}
-              {@const card = projectPart(part)}
-              <div
-                class="work-card"
-                class:context-card={card.kind === "context"}
-                class:waiting-card={card.status === "waiting"}
-                class:success-card={card.tone === "success"}
-                class:danger-card={card.tone === "danger"}
-                class:info-card={card.tone === "info"}
-              >
-                <div class="work-card-head">
-                  <span>{card.eyebrow}</span>
-                  <span>{card.statusLabel}</span>
-                </div>
-                <p class="work-title">{card.title}</p>
-                {#if card.summary}
-                  <p class="work-summary">{card.summary}</p>
-                {/if}
+              {@const quote = projectPriceQuote({
+                toolName: part.toolName,
+                state: part.state,
+                output: part.output,
+              })}
+              {#if quote}
+                <PriceQuoteCard {quote} {layout} />
+              {:else}
+                {@const card = projectPart(part)}
+                <div
+                  class="work-card"
+                  class:context-card={card.kind === "context"}
+                  class:waiting-card={card.status === "waiting"}
+                  class:success-card={card.tone === "success"}
+                  class:danger-card={card.tone === "danger"}
+                  class:info-card={card.tone === "info"}
+                >
+                  <div class="work-card-head">
+                    <span>{card.eyebrow}</span>
+                    <span>{card.statusLabel}</span>
+                  </div>
+                  <p class="work-title">{card.title}</p>
+                  {#if card.summary}
+                    <p class="work-summary">{card.summary}</p>
+                  {/if}
 
-                {#if card.facts.length > 0}
-                  <dl class="work-facts">
-                    {#each card.facts as fact}
-                      <div>
-                        <dt>{fact.label}</dt>
-                        <dd>{fact.value}</dd>
-                      </div>
-                    {/each}
-                  </dl>
-                {/if}
-
-                {#if card.steps.length > 0}
-                  <ol class="work-steps">
-                    {#each card.steps as step}
-                      <li>
-                        <span
-                          class="step-mark"
-                          class:step-done={step.status === "success"}
-                          class:step-active={step.status === "running" || step.status === "waiting"}
-                          class:step-failed={step.status === "failed" || step.status === "denied"}
-                        ></span>
-                        <span>{step.label}</span>
-                      </li>
-                    {/each}
-                  </ol>
-                {/if}
-
-                {#if card.receipts.length > 0}
-                  <div class="work-receipts">
-                    {#each card.receipts as receipt}
-                      <div class="receipt-row">
+                  {#if card.facts.length > 0}
+                    <dl class="work-facts">
+                      {#each card.facts as fact}
                         <div>
-                          {#if receipt.href}
-                            <a
-                              href={receipt.href}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {receipt.label} ↗
-                            </a>
-                          {:else}
-                            <span>{receipt.label}</span>
-                          {/if}
-                          {#if receipt.reference}
-                            <code>{receipt.reference}</code>
-                          {/if}
+                          <dt>{fact.label}</dt>
+                          <dd>{fact.value}</dd>
                         </div>
-                        <span>{receipt.status}</span>
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
+                      {/each}
+                    </dl>
+                  {/if}
 
-                {#each card.links as link}
-                  <a
-                    class="work-link"
-                    href={link.href}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {link.label} ↗
-                  </a>
-                {/each}
+                  {#if card.steps.length > 0}
+                    <ol class="work-steps">
+                      {#each card.steps as step}
+                        <li>
+                          <span
+                            class="step-mark"
+                            class:step-done={step.status === "success"}
+                            class:step-active={step.status === "running" || step.status === "waiting"}
+                            class:step-failed={step.status === "failed" || step.status === "denied"}
+                          ></span>
+                          <span>{step.label}</span>
+                        </li>
+                      {/each}
+                    </ol>
+                  {/if}
 
-                {#if card.details.length > 0}
-                  <details class="work-details">
-                    <summary>Details</summary>
-                    {#each card.details as detail}
-                      <p>{detail}</p>
-                    {/each}
-                  </details>
-                {/if}
+                  {#if card.receipts.length > 0}
+                    <div class="work-receipts">
+                      {#each card.receipts as receipt}
+                        <div class="receipt-row">
+                          <div>
+                            {#if receipt.href}
+                              <a
+                                href={receipt.href}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {receipt.label} ↗
+                              </a>
+                            {:else}
+                              <span>{receipt.label}</span>
+                            {/if}
+                            {#if receipt.reference}
+                              <code>{receipt.reference}</code>
+                            {/if}
+                          </div>
+                          <span>{receipt.status}</span>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
 
-                {#if part.toolMetadata?.eve?.inputRequest}
-                  <div class="work-actions">
-                    <button
-                      class="primary"
-                      type="button"
-                      onclick={() => answerPart(part, true)}
+                  {#each card.links as link}
+                    <a
+                      class="work-link"
+                      href={link.href}
+                      target="_blank"
+                      rel="noreferrer"
                     >
-                      {card.kind === "context" ? "Apply" : "Approve"}
-                    </button>
-                    <button
-                      class="ghost"
-                      type="button"
-                      onclick={() => answerPart(part, false)}
-                    >
-                      {card.kind === "context" ? "Dismiss" : "Deny"}
-                    </button>
-                  </div>
-                {/if}
-              </div>
+                      {link.label} ↗
+                    </a>
+                  {/each}
+
+                  {#if card.details.length > 0}
+                    <details class="work-details">
+                      <summary>Details</summary>
+                      {#each card.details as detail}
+                        <p>{detail}</p>
+                      {/each}
+                    </details>
+                  {/if}
+
+                  {#if part.toolMetadata?.eve?.inputRequest}
+                    <div class="work-actions">
+                      <button
+                        class="primary"
+                        type="button"
+                        onclick={() => answerPart(part, true)}
+                      >
+                        {card.kind === "context" ? "Apply" : "Approve"}
+                      </button>
+                      <button
+                        class="ghost"
+                        type="button"
+                        onclick={() => answerPart(part, false)}
+                      >
+                        {card.kind === "context" ? "Dismiss" : "Deny"}
+                      </button>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
             {/if}
           {/each}
         </div>

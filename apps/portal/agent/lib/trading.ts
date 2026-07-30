@@ -94,24 +94,58 @@ function findPosition(
   return position;
 }
 
-export async function currentPhoenixPrice(symbol: string): Promise<number> {
+export type PhoenixPricePoint = {
+  observedAt: string;
+  priceUsd: number;
+};
+
+export async function recentPhoenixPrices(
+  symbol: string,
+  limit = 6,
+): Promise<PhoenixPricePoint[]> {
+  const boundedLimit = Math.max(2, Math.min(12, Math.trunc(limit)));
   const params = new URLSearchParams({
     symbol: normalizeSymbol(symbol),
     timeframe: "1m",
-    limit: "2",
+    limit: String(boundedLimit),
   });
   const response = await fetch(
     `https://perp-api.phoenix.trade/candles?${params}`,
+    { signal: AbortSignal.timeout(12_000) },
   );
   if (!response.ok) throw new Error(`phoenix-price-${response.status}`);
   const rows = (await response.json()) as unknown;
   if (!Array.isArray(rows)) throw new Error("phoenix-price-malformed");
-  const latest = rows.at(-1);
-  const price =
-    typeof latest === "object" && latest !== null
-      ? Number((latest as Record<string, unknown>).close)
-      : NaN;
-  return finitePositive(price, "phoenix-price");
+  const points = rows
+    .flatMap((row): PhoenixPricePoint[] => {
+      if (typeof row !== "object" || row === null) return [];
+      const record = row as Record<string, unknown>;
+      const priceUsd = Number(record.close);
+      const observedAtMs = Number(record.time);
+      if (
+        !Number.isFinite(priceUsd) ||
+        priceUsd <= 0 ||
+        !Number.isFinite(observedAtMs) ||
+        observedAtMs <= 0
+      ) {
+        return [];
+      }
+      return [
+        {
+          priceUsd,
+          observedAt: new Date(observedAtMs).toISOString(),
+        },
+      ];
+    })
+    .sort((a, b) => Date.parse(a.observedAt) - Date.parse(b.observedAt))
+    .slice(-boundedLimit);
+  if (points.length === 0) throw new Error("phoenix-price-malformed");
+  return points;
+}
+
+export async function currentPhoenixPrice(symbol: string): Promise<number> {
+  const points = await recentPhoenixPrices(symbol, 2);
+  return finitePositive(points.at(-1)?.priceUsd, "phoenix-price");
 }
 
 function validateWalletTransaction(
