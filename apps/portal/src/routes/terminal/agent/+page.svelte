@@ -6,7 +6,10 @@
   import { page } from "$app/state";
   import AgentChat from "../components/AgentChat.svelte";
   import AuthModal from "../components/AuthModal.svelte";
-  import { buildPaperDeskContext } from "$lib/agent/paper-host";
+  import {
+    buildPaperDeskContext,
+    registerPaperAgentHost,
+  } from "$lib/agent/paper-host";
   import { chatState } from "$lib/chat";
   import { initializePrivyAuth, privyAuth } from "$lib/privy-auth";
 
@@ -20,6 +23,7 @@
     // should restore this same conversation in the open dock.
     chatState.update((state) => ({ ...state, open: true }));
     void initializePrivyAuth();
+    return registerPaperAgentHost();
   });
 
   function requestAuth(): void {

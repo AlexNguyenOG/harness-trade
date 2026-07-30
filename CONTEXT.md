@@ -18,6 +18,13 @@ Examples:
 - “Review SOL every 15 minutes.”
 - “Move the current SOL stop to break-even.”
 
+### Conversation
+
+The durable, ordered interaction history between a user and the agent. A
+Conversation can contain many Tasks and survives navigation, reloads, and
+deployments. It carries requests, responses, approvals, and Artifacts, but is
+not itself a Task, Plan, Policy Decision, or source of execution authority.
+
 ### Plan
 
 An immutable, revisioned description of how a Task will be completed. A Plan

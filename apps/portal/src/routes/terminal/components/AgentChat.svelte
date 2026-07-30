@@ -1,43 +1,18 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import {
-    Client,
-    isCurrentTurnBoundaryEvent,
-    type HandleMessageStreamEvent,
-    type SessionState,
-  } from "eve/client";
-  import {
-    useEveAgent,
     type EveDynamicToolPart,
     type EveMessagePart,
   } from "eve/svelte";
-  import { onMount } from "svelte";
   import { closeChat } from "$lib/chat";
+  import { createAgentConversation } from "$lib/agent/conversation.svelte";
   import { AGENT_MODE_LABEL, type AgentMode } from "$lib/agent/modes";
-  import { agentState, getAgentPolicy, setAgentMode, setAgentPaused } from "$lib/agent/state";
-  import {
-    clearAgentThread,
-    loadAgentThread,
-    prepareAgentThreadForResume,
-    saveAgentThread,
-    type AgentThreadSnapshot,
-  } from "$lib/agent/thread-cache";
+  import { agentState, setAgentMode, setAgentPaused } from "$lib/agent/state";
   import {
     projectHarnessTool,
     type WorkstreamCard,
   } from "$lib/agent/workstream";
-  import {
-    AGENT_ACTION_META,
-    type AgentActionName,
-  } from "$lib/agent/actions";
-  import {
-    executeAgentAction,
-    type AgentActionResult,
-  } from "$lib/agent/host";
-  import {
-    getPrivyAccessToken,
-    privyAuth,
-  } from "$lib/privy-auth";
+  import { privyAuth } from "$lib/privy-auth";
   import { projectPriceQuote } from "$lib/agent/price-presentation";
   import MarkdownMessage from "./MarkdownMessage.svelte";
   import PriceQuoteCard from "./PriceQuoteCard.svelte";
@@ -66,57 +41,17 @@
   let inputEl: HTMLTextAreaElement | null = $state(null);
   let handledFocusComposerRequest = 0;
   const agentModes: AgentMode[] = ["observe", "ask", "auto"];
-  const cachedThread = browser ? loadAgentThread(localStorage) : null;
-  const restoredThread = cachedThread
-    ? prepareAgentThreadForResume(cachedThread)
-    : null;
-  let paperActionReceipts = $state<Record<string, AgentActionResult>>({
-    ...(restoredThread?.paperActionReceipts ?? {}),
+  const conversation = createAgentConversation({
+    accountMode: () => accountMode,
+    buildContext: () => buildContext(),
+    storage: browser ? localStorage : undefined,
   });
-  const paperActionRuns = new Set<string>(
-    restoredThread?.paperActionRuns ??
-      Object.keys(restoredThread?.paperActionReceipts ?? {}),
-  );
-  let recoveringThread = $state(
-    browser && isSessionState(restoredThread?.session),
-  );
-  let recoveryError = $state("");
 
-  let eve = $state.raw(createAgent(restoredThread));
-
-  function buildEveContext(): NonNullable<
-    Parameters<typeof eve.send>[0]["clientContext"]
-  > {
-    // buildDeskContext is the JSON-safe serializer at this client boundary.
-    const policy = getAgentPolicy();
-    return {
-      ...buildContext(),
-      agentPolicy: {
-        mode: policy.mode,
-        paused: policy.paused,
-        accountMode,
-      },
-    } as NonNullable<
-      Parameters<typeof eve.send>[0]["clientContext"]
-    >;
-  }
-
-  const agentWorking = $derived(
-    eve.status === "submitted" || eve.status === "streaming",
-  );
-  const busy = $derived(
-    recoveringThread || recoveryError.length > 0 || agentWorking,
-  );
-  const pendingRequests = $derived(
-    eve.data.messages.flatMap((message) =>
-      message.parts
-        .filter(isDynamicToolPart)
-        .map((part) => part.toolMetadata?.eve?.inputRequest)
-        .filter((request) => request !== undefined),
-    ),
-  );
+  const agentWorking = $derived(conversation.working);
+  const busy = $derived(conversation.busy);
+  const pendingRequests = $derived(conversation.pendingRequests);
   const hasActiveTool = $derived(
-    eve.data.messages
+    conversation.messages
       .flatMap((message) => message.parts.filter(isDynamicToolPart))
       .some((part) =>
         ["pending", "running", "waiting"].includes(projectPart(part).status),
@@ -125,8 +60,8 @@
 
   $effect(() => {
     if (!scrollEl) return;
-    void eve.data.messages.length;
-    void eve.status;
+    void conversation.messages.length;
+    void conversation.status;
     scrollEl.scrollTop = scrollEl.scrollHeight;
   });
 
@@ -143,147 +78,11 @@
     inputEl.focus();
   });
 
-  $effect(() => {
-    if (!browser) return;
-    persistCurrentThread();
-  });
-
-  $effect(() => {
-    if (!browser || accountMode !== "paper") return;
-    const parts = eve.data.messages.flatMap((message) =>
-      message.parts.filter(isDynamicToolPart),
-    );
-    for (const part of parts) {
-      const action = paperActionFromPart(part);
-      if (!action || paperActionRuns.has(part.toolCallId)) continue;
-      paperActionRuns.add(part.toolCallId);
-      persistCurrentThread();
-      void executeAgentAction(action.name, action.args).then((receipt) => {
-        paperActionReceipts = {
-          ...paperActionReceipts,
-          [part.toolCallId]: receipt,
-        };
-        persistCurrentThread();
-      });
-    }
-  });
-
-  onMount(() => {
-    if (!recoveringThread || !restoredThread) return;
-    const controller = new AbortController();
-    void recoverThread(restoredThread, controller.signal);
-    return () => controller.abort();
-  });
-
-  function persistCurrentThread(): void {
-    persistThreadSnapshot(eve.session, eve.events);
-  }
-
-  function persistThreadSnapshot(
-    session: unknown,
-    events: readonly unknown[],
-  ): void {
-    if (!browser) return;
-    try {
-      saveAgentThread(localStorage, {
-        session,
-        events,
-        paperActionRuns: [...paperActionRuns],
-        paperActionReceipts,
-      });
-    } catch {
-      // A private browser or exhausted quota should not break the session.
-    }
-  }
-
-  function createAgent(thread: AgentThreadSnapshot | null) {
-    return useEveAgent({
-      initialSession: thread?.session as never,
-      initialEvents: thread?.events as never,
-      headers: resolveAgentHeaders,
-      onFinish(snapshot) {
-        persistThreadSnapshot(snapshot.session, snapshot.events);
-      },
-    });
-  }
-
-  async function resolveAgentHeaders(): Promise<Record<string, string>> {
-    const token = await getPrivyAccessToken();
-    const policy = getAgentPolicy();
-    return {
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-      "x-harness-agent-mode": policy.mode,
-      "x-harness-agent-paused": String(policy.paused),
-      "x-harness-account-mode": accountMode,
-    };
-  }
-
-  async function recoverThread(
-    thread: AgentThreadSnapshot,
-    signal: AbortSignal,
-  ): Promise<void> {
-    if (!isSessionState(thread.session)) {
-      recoveringThread = false;
-      return;
-    }
-
-    const session = new Client({ host: "", headers: resolveAgentHeaders }).session(
-      thread.session,
-    );
-    const recoveredEvents: HandleMessageStreamEvent[] = [];
-
-    try {
-      for await (const event of session.stream({ follow: false, signal })) {
-        recoveredEvents.push(event);
-      }
-
-      const lastKnownEvent =
-        recoveredEvents.at(-1) ??
-        (thread.events.at(-1) as HandleMessageStreamEvent | undefined);
-      if (
-        session.state.sessionId &&
-        (!lastKnownEvent || !isCurrentTurnBoundaryEvent(lastKnownEvent))
-      ) {
-        for await (const event of session.stream({ signal })) {
-          recoveredEvents.push(event);
-          if (isCurrentTurnBoundaryEvent(event)) break;
-        }
-      }
-
-      if (signal.aborted) return;
-      const recoveredThread = prepareAgentThreadForResume({
-        ...thread,
-        session: session.state,
-        events: [...thread.events, ...recoveredEvents],
-      });
-      persistThreadSnapshot(recoveredThread.session, recoveredThread.events);
-      eve.stop();
-      eve = createAgent(recoveredThread);
-      recoveringThread = false;
-    } catch (error) {
-      if (signal.aborted) return;
-      recoveryError =
-        error instanceof Error ? error.message : "conversation-recovery-error";
-      recoveringThread = false;
-    }
-  }
-
-  function isSessionState(value: unknown): value is SessionState {
-    return (
-      typeof value === "object" &&
-      value !== null &&
-      "sessionId" in value &&
-      typeof value.sessionId === "string" &&
-      "streamIndex" in value &&
-      typeof value.streamIndex === "number"
-    );
-  }
-
   function sendMessage(value: string): void {
     const text = value.trim();
     if (!text || busy) return;
     draft = "";
-    void eve.send({ message: text, clientContext: buildEveContext() });
+    void conversation.send(text);
     inputEl?.focus();
   }
 
@@ -308,7 +107,7 @@
   }
 
   function projectPart(part: EveDynamicToolPart): WorkstreamCard {
-    const paperReceipt = paperActionReceipts[part.toolCallId];
+    const paperReceipt = conversation.paperReceipt(part.toolCallId);
     return projectHarnessTool({
       toolName: part.toolName,
       state: part.state,
@@ -364,61 +163,22 @@
     if (part) answerPart(part, approved);
   }
 
-  function paperActionFromPart(
-    part: EveDynamicToolPart,
-  ): { name: AgentActionName; args: Record<string, unknown> } | null {
-    if (part.state !== "output-available") return null;
-    const output = asRecord(part.output);
-    const action = asRecord(output?.paperAction);
-    const name = action?.name;
-    const args = asRecord(action?.args);
-    if (
-      typeof name !== "string" ||
-      !AGENT_ACTION_META.some((entry) => entry.name === name) ||
-      !args
-    ) {
-      return null;
-    }
-    return { name: name as AgentActionName, args };
-  }
-
-  function asRecord(value: unknown): Record<string, unknown> | null {
-    return typeof value === "object" && value !== null && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : null;
-  }
-
-  async function answer(requestId: string, approved: boolean): Promise<void> {
-    await eve.send({
-      inputResponses: [
-        { requestId, optionId: approved ? "approve" : "deny" },
-      ],
-    });
-  }
-
   function answerPart(part: EveDynamicToolPart, approved: boolean): void {
     const request = part.toolMetadata?.eve?.inputRequest;
-    if (request) void answer(request.requestId, approved);
+    if (request) void conversation.respond(request.requestId, approved);
   }
 
   function resetSession(): void {
-    paperActionRuns.clear();
-    paperActionReceipts = {};
-    recoveryError = "";
-    recoveringThread = false;
-    eve.reset();
-    if (browser) {
-      clearAgentThread(localStorage);
-    }
+    conversation.reset();
   }
 
   function handleExpand(): void {
-    persistCurrentThread();
+    conversation.persist();
     onExpand?.();
   }
 
   function handleClose(): void {
-    persistCurrentThread();
+    conversation.persist();
     if (onClose) onClose();
     else closeChat();
   }
@@ -490,7 +250,7 @@
 
   <div class="agent-scroll" bind:this={scrollEl}>
     <div class="agent-thread">
-      {#if eve.data.messages.length === 0 && eve.status === "ready"}
+      {#if conversation.messages.length === 0 && conversation.status === "ready"}
         <div class="agent-empty">
           <h2>Your persistent trading agent</h2>
           <p>
@@ -509,7 +269,7 @@
         </div>
       {/if}
 
-      {#each eve.data.messages as message, index (index)}
+      {#each conversation.messages as message, index (index)}
         <div class="msg {message.role}">
           {#each message.parts as part}
             {#if part.type === "text" && partText(part)}
@@ -550,11 +310,11 @@
         </div>
       {/if}
 
-      {#if recoveringThread}
+      {#if conversation.reconnecting}
         <div class="state" aria-live="polite">
           <p>Reconnecting this conversation…</p>
         </div>
-      {:else if recoveryError}
+      {:else if conversation.recoveryError}
         <div class="state error">
           <p>Conversation recovery failed. Start a new session before sending.</p>
         </div>
@@ -569,8 +329,8 @@
             Sign in
           </button>
         </div>
-      {:else if eve.status === "error"}
-        <p class="state error">{eve.error?.message ?? "agent-transport-error"}</p>
+      {:else if conversation.status === "error"}
+        <p class="state error">{conversation.error?.message ?? "agent-transport-error"}</p>
       {/if}
     </div>
   </div>
