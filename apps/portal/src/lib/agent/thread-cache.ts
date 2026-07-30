@@ -23,6 +23,8 @@ export interface PreparedAgentThread extends AgentThreadSnapshot {
 const THREAD_KEY = "harness.eve.thread.v2";
 const LEGACY_SESSION_KEY = "harness.eve.session.v1";
 const LEGACY_EVENTS_KEY = "harness.eve.events.v1";
+const UNKNOWN_PAPER_ACTION_MESSAGE =
+  "Paper action outcome unknown after interruption. Check the paper portfolio before retrying.";
 
 export function loadAgentThread(
   storage: AgentThreadStorage,
@@ -108,7 +110,17 @@ export function prepareAgentThreadForResume(
 ): PreparedAgentThread {
   const events = uniqueEvents(thread.events);
   const session = sessionCursor(thread.session);
+  const paperActionReceipts = { ...(thread.paperActionReceipts ?? {}) };
   let repaired = events.length !== thread.events.length;
+
+  for (const callId of thread.paperActionRuns ?? []) {
+    if (typeof callId !== "string" || paperActionReceipts[callId]) continue;
+    paperActionReceipts[callId] = {
+      ok: false,
+      message: UNKNOWN_PAPER_ACTION_MESSAGE,
+    };
+    repaired = true;
+  }
 
   if (session?.sessionId) {
     const persistedEventCount = currentSessionEventCount(events);
@@ -122,6 +134,9 @@ export function prepareAgentThreadForResume(
     ...thread,
     session: session ?? thread.session,
     events,
+    ...(Object.keys(paperActionReceipts).length > 0
+      ? { paperActionReceipts }
+      : {}),
     repaired,
   };
 }

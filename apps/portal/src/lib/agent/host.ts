@@ -8,6 +8,11 @@ export type AgentActionResult = {
   message: string;
 };
 
+export type AgentActionExecutor = (
+  name: AgentActionName,
+  args: Record<string, unknown>,
+) => Promise<AgentActionResult>;
+
 export type AgentHostHandlers = {
   [K in AgentActionName]?: (
     args: Record<string, unknown>,
@@ -31,7 +36,15 @@ export async function executeAgentAction(
   if (!host) {
     return { ok: false, message: "agent host not registered" };
   }
-  const handler = host[name];
+  return executeAgentHostAction(host, name, args);
+}
+
+export async function executeAgentHostAction(
+  handlers: AgentHostHandlers,
+  name: AgentActionName,
+  args: Record<string, unknown>,
+): Promise<AgentActionResult> {
+  const handler = handlers[name];
   if (!handler) {
     return { ok: false, message: `action not wired: ${name}` };
   }

@@ -19,12 +19,7 @@ import {
   setPaperTpSl,
 } from "$lib/terminal/paper-ledger";
 import { PREFS_STORAGE_KEY, parsePrefs } from "$lib/terminal/prefs";
-import {
-  type AgentActionResult,
-  type AgentHostHandlers,
-  registerAgentHost,
-  unregisterAgentHost,
-} from "./host";
+import type { AgentActionResult, AgentHostHandlers } from "./host";
 
 function ok(message: string): AgentActionResult {
   return { ok: true, message };
@@ -92,7 +87,7 @@ export function buildPaperDeskContext(): Record<string, unknown> {
   });
 }
 
-export function registerPaperAgentHost(): () => void {
+export function createPaperAgentHost(): AgentHostHandlers {
   const handlers: AgentHostHandlers = {
     switch_market: (args) => {
       const symbol =
@@ -393,6 +388,5 @@ export function registerPaperAgentHost(): () => void {
     set_agent_pause: (args) => ok(args.paused === true ? "paused" : "resumed"),
   };
 
-  registerAgentHost(handlers);
-  return () => unregisterAgentHost();
+  return handlers;
 }

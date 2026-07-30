@@ -147,4 +147,31 @@ describe("agent thread cache", () => {
     expect(prepared.session).toMatchObject({ streamIndex: 2 });
     expect(prepared.repaired).toBe(true);
   });
+
+  test("interrupted paper actions recover as unknown Receipts", () => {
+    const prepared = prepareAgentThreadForResume({
+      session: { sessionId: "session-1", streamIndex: 0 },
+      events: [],
+      paperActionRuns: ["call-complete", "call-interrupted"],
+      paperActionReceipts: {
+        "call-complete": {
+          ok: true,
+          message: "paper long confirmed",
+        },
+      },
+    });
+
+    expect(prepared.paperActionReceipts).toEqual({
+      "call-complete": {
+        ok: true,
+        message: "paper long confirmed",
+      },
+      "call-interrupted": {
+        ok: false,
+        message:
+          "Paper action outcome unknown after interruption. Check the paper portfolio before retrying.",
+      },
+    });
+    expect(prepared.repaired).toBe(true);
+  });
 });

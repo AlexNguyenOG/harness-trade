@@ -1,18 +1,28 @@
 <script lang="ts">
   import { browser } from "$app/environment";
-  import {
-    type EveDynamicToolPart,
-    type EveMessagePart,
-  } from "eve/svelte";
   import { closeChat } from "$lib/chat";
-  import { createAgentConversation } from "$lib/agent/conversation.svelte";
+  import {
+    type AgentClientContext,
+    type AgentConversationPart,
+    type AgentConversationToolPart,
+    createAgentConversation,
+  } from "$lib/agent/conversation.svelte";
   import { AGENT_MODE_LABEL, type AgentMode } from "$lib/agent/modes";
-  import { agentState, setAgentMode, setAgentPaused } from "$lib/agent/state";
+  import {
+    type AgentActionExecutor,
+    executeAgentAction,
+  } from "$lib/agent/host";
+  import {
+    agentState,
+    getAgentPolicy,
+    setAgentMode,
+    setAgentPaused,
+  } from "$lib/agent/state";
   import {
     projectHarnessTool,
     type WorkstreamCard,
   } from "$lib/agent/workstream";
-  import { privyAuth } from "$lib/privy-auth";
+  import { getPrivyAccessToken, privyAuth } from "$lib/privy-auth";
   import { projectPriceQuote } from "$lib/agent/price-presentation";
   import MarkdownMessage from "./MarkdownMessage.svelte";
   import PriceQuoteCard from "./PriceQuoteCard.svelte";
@@ -24,6 +34,7 @@
     accountMode = "paper",
     layout = "dock",
     focusComposerRequest = 0,
+    executePaperAction = executeAgentAction,
     onExpand = undefined,
     onClose = undefined,
   }: {
@@ -32,6 +43,7 @@
     accountMode?: "live" | "paper";
     layout?: "dock" | "page";
     focusComposerRequest?: number;
+    executePaperAction?: AgentActionExecutor;
     onExpand?: () => void;
     onClose?: () => void;
   } = $props();
@@ -42,17 +54,42 @@
   let handledFocusComposerRequest = 0;
   const agentModes: AgentMode[] = ["observe", "ask", "auto"];
   const conversation = createAgentConversation({
-    accountMode: () => accountMode,
-    buildContext: () => buildContext(),
+    buildClientContext,
+    executePaperAction: (name, args) => executePaperAction(name, args),
+    headers: resolveConversationHeaders,
+    isPaper: () => accountMode === "paper",
     storage: browser ? localStorage : undefined,
   });
 
+  async function resolveConversationHeaders(): Promise<Record<string, string>> {
+    const token = await getPrivyAccessToken();
+    const policy = getAgentPolicy();
+    return {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      "x-harness-agent-mode": policy.mode,
+      "x-harness-agent-paused": String(policy.paused),
+      "x-harness-account-mode": accountMode,
+    };
+  }
+
+  function buildClientContext(): AgentClientContext {
+    const policy = getAgentPolicy();
+    return {
+      ...buildContext(),
+      agentPolicy: {
+        mode: policy.mode,
+        paused: policy.paused,
+        accountMode,
+      },
+    } as AgentClientContext;
+  }
+
   const agentWorking = $derived(conversation.working);
   const busy = $derived(conversation.busy);
-  const pendingRequests = $derived(conversation.pendingRequests);
+  const pendingRequestCount = $derived(conversation.pendingRequestCount);
   const hasActiveTool = $derived(
     conversation.messages
-      .flatMap((message) => message.parts.filter(isDynamicToolPart))
+      .flatMap((message) => message.parts.filter(isToolPart))
       .some((part) =>
         ["pending", "running", "waiting"].includes(projectPart(part).status),
       ),
@@ -97,16 +134,18 @@
     (event.currentTarget as HTMLTextAreaElement).form?.requestSubmit();
   }
 
-  function isDynamicToolPart(part: EveMessagePart): part is EveDynamicToolPart {
-    return part.type === "dynamic-tool";
+  function isToolPart(
+    part: AgentConversationPart,
+  ): part is AgentConversationToolPart {
+    return part.type === "tool";
   }
 
-  function partText(part: EveMessagePart): string {
+  function partText(part: AgentConversationPart): string {
     if (part.type === "text") return part.text;
     return "";
   }
 
-  function projectPart(part: EveDynamicToolPart): WorkstreamCard {
+  function projectPart(part: AgentConversationToolPart): WorkstreamCard {
     const paperReceipt = conversation.paperReceipt(part.toolCallId);
     return projectHarnessTool({
       toolName: part.toolName,
@@ -126,46 +165,34 @@
           }
         : part.output,
       errorText: part.errorText,
-      approvalPending: Boolean(part.toolMetadata?.eve?.inputRequest),
+      approvalPending: part.approvalPending,
     });
   }
 
   function messageToolParts(
-    parts: readonly EveMessagePart[],
-  ): EveDynamicToolPart[] {
-    return parts.filter(isDynamicToolPart);
+    parts: readonly AgentConversationPart[],
+  ): AgentConversationToolPart[] {
+    return parts.filter(isToolPart);
   }
 
   function isFirstToolPart(
-    parts: readonly EveMessagePart[],
-    part: EveDynamicToolPart,
+    parts: readonly AgentConversationPart[],
+    part: AgentConversationToolPart,
   ): boolean {
     return messageToolParts(parts)[0]?.toolCallId === part.toolCallId;
   }
 
-  function toolActivityItems(parts: readonly EveMessagePart[]) {
+  function toolActivityItems(parts: readonly AgentConversationPart[]) {
     return messageToolParts(parts).map((part) => ({
       id: part.toolCallId,
       toolName: part.toolName,
       card: projectPart(part),
-      approvalPending: Boolean(part.toolMetadata?.eve?.inputRequest),
+      approvalPending: part.approvalPending,
     }));
   }
 
-  function answerTool(
-    parts: readonly EveMessagePart[],
-    toolCallId: string,
-    approved: boolean,
-  ): void {
-    const part = messageToolParts(parts).find(
-      (candidate) => candidate.toolCallId === toolCallId,
-    );
-    if (part) answerPart(part, approved);
-  }
-
-  function answerPart(part: EveDynamicToolPart, approved: boolean): void {
-    const request = part.toolMetadata?.eve?.inputRequest;
-    if (request) void conversation.respond(request.requestId, approved);
+  function answerTool(toolCallId: string, approved: boolean): void {
+    void conversation.respondToTool(toolCallId, approved);
   }
 
   function resetSession(): void {
@@ -196,7 +223,7 @@
       <div class="agent-title-row">
         <span class="agent-title">Agent</span>
         <span class="tag durable">
-          DURABLE{pendingRequests.length ? ` · ${pendingRequests.length}` : ""}
+          DURABLE{pendingRequestCount ? ` · ${pendingRequestCount}` : ""}
         </span>
         {#if $agentState.paused}
           <span class="tag pause" title="Money-PAUSE engaged">PAUSE</span>
@@ -278,16 +305,12 @@
               {:else}
                 <span>{partText(part)}</span>
               {/if}
-            {:else if isDynamicToolPart(part)}
+            {:else if isToolPart(part)}
               {#if isFirstToolPart(message.parts, part)}
                 <ToolActivity
                   items={toolActivityItems(message.parts)}
                   onAnswer={(toolCallId, approved) =>
-                    answerTool(
-                      message.parts,
-                      toolCallId,
-                      approved,
-                    )}
+                    answerTool(toolCallId, approved)}
                 />
               {/if}
               {@const quote = projectPriceQuote({

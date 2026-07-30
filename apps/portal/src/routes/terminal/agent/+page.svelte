@@ -7,9 +7,10 @@
   import AgentChat from "../components/AgentChat.svelte";
   import AuthModal from "../components/AuthModal.svelte";
   import {
-    buildPaperDeskContext,
-    registerPaperAgentHost,
-  } from "$lib/agent/paper-host";
+    type AgentActionExecutor,
+    executeAgentHostAction,
+  } from "$lib/agent/host";
+  import { buildPaperDeskContext, createPaperAgentHost } from "$lib/agent/paper-host";
   import { chatState } from "$lib/chat";
   import { initializePrivyAuth, privyAuth } from "$lib/privy-auth";
 
@@ -17,13 +18,15 @@
     page.url.searchParams.get("account") === "live" ? "live" : "paper",
   );
   let authOpen = $state(false);
+  const paperAgentHost = createPaperAgentHost();
+  const executePaperAction: AgentActionExecutor = (name, args) =>
+    executeAgentHostAction(paperAgentHost, name, args);
 
   onMount(() => {
     // The full page replaces the dock visually, but returning to the terminal
     // should restore this same conversation in the open dock.
     chatState.update((state) => ({ ...state, open: true }));
     void initializePrivyAuth();
-    return registerPaperAgentHost();
   });
 
   function requestAuth(): void {
@@ -57,6 +60,7 @@
   <main class="agent-main">
     <AgentChat
       buildContext={buildPaperDeskContext}
+      {executePaperAction}
       onRequestAuth={requestAuth}
       {accountMode}
       layout="page"

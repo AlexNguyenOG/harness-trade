@@ -2,6 +2,7 @@ import {
   Client,
   type HandleMessageStreamEvent,
   isCurrentTurnBoundaryEvent,
+  type SendTurnPayload,
   type SessionState,
 } from "eve/client";
 import {
@@ -10,10 +11,8 @@ import {
   useEveAgent,
 } from "eve/svelte";
 import { onMount } from "svelte";
-import { getPrivyAccessToken } from "$lib/privy-auth";
 import { AGENT_ACTION_META, type AgentActionName } from "./actions";
-import { type AgentActionResult, executeAgentAction } from "./host";
-import { getAgentPolicy } from "./state";
+import type { AgentActionExecutor, AgentActionResult } from "./host";
 import {
   type AgentThreadSnapshot,
   type AgentThreadStorage,
@@ -24,9 +23,36 @@ import {
 } from "./thread-cache";
 
 export type AgentConversationOptions = {
-  accountMode: () => "live" | "paper";
-  buildContext: () => Record<string, unknown>;
+  buildClientContext: () => AgentClientContext;
+  executePaperAction: AgentActionExecutor;
+  headers: () => Promise<Record<string, string>>;
+  isPaper: () => boolean;
   storage?: AgentThreadStorage;
+};
+
+export type AgentClientContext = NonNullable<SendTurnPayload["clientContext"]>;
+
+export type AgentConversationPart =
+  | {
+      type: "text";
+      text: string;
+    }
+  | AgentConversationToolPart;
+
+export type AgentConversationToolPart = {
+  type: "tool";
+  toolCallId: string;
+  toolName: string;
+  state: string;
+  input: unknown;
+  output: unknown;
+  errorText?: string;
+  approvalPending: boolean;
+};
+
+export type AgentConversationMessage = {
+  role: string;
+  parts: AgentConversationPart[];
 };
 
 /**
@@ -58,12 +84,15 @@ export function createAgentConversation(options: AgentConversationOptions) {
     eve.status === "submitted" || eve.status === "streaming",
   );
   const busy = $derived(reconnecting || recoveryError.length > 0 || working);
-  const pendingRequests = $derived(
-    eve.data.messages.flatMap((message) =>
-      message.parts
-        .filter(isDynamicToolPart)
-        .map((part) => part.toolMetadata?.eve?.inputRequest)
-        .filter((request) => request !== undefined),
+  const messages = $derived(eve.data.messages.map(projectConversationMessage));
+  const pendingRequestCount = $derived(
+    messages.reduce(
+      (count, message) =>
+        count +
+        message.parts.filter(
+          (part) => part.type === "tool" && part.approvalPending,
+        ).length,
+      0,
     ),
   );
 
@@ -73,7 +102,7 @@ export function createAgentConversation(options: AgentConversationOptions) {
   });
 
   $effect(() => {
-    if (!options.storage || options.accountMode() !== "paper") return;
+    if (!options.storage || !options.isPaper()) return;
     const parts = eve.data.messages.flatMap((message) =>
       message.parts.filter(isDynamicToolPart),
     );
@@ -82,13 +111,15 @@ export function createAgentConversation(options: AgentConversationOptions) {
       if (!action || paperActionRuns.has(part.toolCallId)) continue;
       paperActionRuns.add(part.toolCallId);
       persistCurrent();
-      void executeAgentAction(action.name, action.args).then((receipt) => {
-        paperActionReceipts = {
-          ...paperActionReceipts,
-          [part.toolCallId]: receipt,
-        };
-        persistCurrent();
-      });
+      void options
+        .executePaperAction(action.name, action.args)
+        .then((receipt) => {
+          paperActionReceipts = {
+            ...paperActionReceipts,
+            [part.toolCallId]: receipt,
+          };
+          persistCurrent();
+        });
     }
   });
 
@@ -103,36 +134,11 @@ export function createAgentConversation(options: AgentConversationOptions) {
     return useEveAgent({
       initialSession: thread?.session as never,
       initialEvents: thread?.events as never,
-      headers: resolveHeaders,
+      headers: options.headers,
       onFinish(snapshot) {
         persistSnapshot(snapshot.session, snapshot.events);
       },
     });
-  }
-
-  async function resolveHeaders(): Promise<Record<string, string>> {
-    const token = await getPrivyAccessToken();
-    const policy = getAgentPolicy();
-    return {
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-      "x-harness-agent-mode": policy.mode,
-      "x-harness-agent-paused": String(policy.paused),
-      "x-harness-account-mode": options.accountMode(),
-    };
-  }
-
-  function buildClientContext(): NonNullable<
-    Parameters<typeof eve.send>[0]["clientContext"]
-  > {
-    const policy = getAgentPolicy();
-    return {
-      ...options.buildContext(),
-      agentPolicy: {
-        mode: policy.mode,
-        paused: policy.paused,
-        accountMode: options.accountMode(),
-      },
-    } as NonNullable<Parameters<typeof eve.send>[0]["clientContext"]>;
   }
 
   async function recover(
@@ -144,7 +150,7 @@ export function createAgentConversation(options: AgentConversationOptions) {
       return;
     }
 
-    const session = new Client({ host: "", headers: resolveHeaders }).session(
+    const session = new Client({ host: "", headers: options.headers }).session(
       thread.session,
     );
     const recoveredEvents: HandleMessageStreamEvent[] = [];
@@ -206,7 +212,7 @@ export function createAgentConversation(options: AgentConversationOptions) {
   function send(message: string): Promise<void> {
     return eve.send({
       message,
-      clientContext: buildClientContext(),
+      clientContext: options.buildClientContext(),
     });
   }
 
@@ -214,6 +220,14 @@ export function createAgentConversation(options: AgentConversationOptions) {
     return eve.send({
       inputResponses: [{ requestId, optionId: approved ? "approve" : "deny" }],
     });
+  }
+
+  function respondToTool(toolCallId: string, approved: boolean): Promise<void> {
+    const requestId = eve.data.messages
+      .flatMap((message) => message.parts.filter(isDynamicToolPart))
+      .find((part) => part.toolCallId === toolCallId)?.toolMetadata?.eve
+      ?.inputRequest?.requestId;
+    return requestId ? respond(requestId, approved) : Promise.resolve();
   }
 
   function reset(): void {
@@ -233,10 +247,10 @@ export function createAgentConversation(options: AgentConversationOptions) {
       return eve.error;
     },
     get messages() {
-      return eve.data.messages;
+      return messages;
     },
-    get pendingRequests() {
-      return pendingRequests;
+    get pendingRequestCount() {
+      return pendingRequestCount;
     },
     get reconnecting() {
       return reconnecting;
@@ -255,9 +269,40 @@ export function createAgentConversation(options: AgentConversationOptions) {
     },
     persist: persistCurrent,
     reset,
-    respond,
+    respondToTool,
     send,
   };
+}
+
+function projectConversationMessage(message: {
+  role: string;
+  parts: readonly EveMessagePart[];
+}): AgentConversationMessage {
+  return {
+    role: message.role,
+    parts: message.parts.flatMap(projectConversationPart),
+  };
+}
+
+function projectConversationPart(
+  part: EveMessagePart,
+): AgentConversationPart[] {
+  if (part.type === "text") {
+    return [{ type: "text", text: part.text }];
+  }
+  if (!isDynamicToolPart(part)) return [];
+  return [
+    {
+      type: "tool",
+      toolCallId: part.toolCallId,
+      toolName: part.toolName,
+      state: part.state,
+      input: part.input,
+      output: part.output,
+      ...(part.errorText ? { errorText: part.errorText } : {}),
+      approvalPending: Boolean(part.toolMetadata?.eve?.inputRequest),
+    },
+  ];
 }
 
 function isDynamicToolPart(part: EveMessagePart): part is EveDynamicToolPart {
