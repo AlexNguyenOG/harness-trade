@@ -1,25 +1,27 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "sveltekit",
-  "installCommand": "bun install",
-  "buildCommand": "bun run typecheck && bun run build",
-  "experimentalServices": {
+  "services": {
     "web": {
-      "entrypoint": ".",
+      "root": ".",
       "framework": "sveltekit",
-      "routePrefix": "/"
+      "installCommand": "bun install",
+      "buildCommand": "bun run typecheck && bun run build"
     },
     "eve": {
-      "buildCommand": "eve build",
-      "entrypoint": ".",
+      "root": ".",
       "framework": "eve",
-      "routePrefix": "/_eve_internal/eve"
+      "installCommand": "bun install",
+      "buildCommand": "eve build"
     }
   },
   "rewrites": [
     {
-      "source": "/eve/v1/:path*",
-      "destination": "/_eve_internal/eve/eve/v1/:path*"
+      "source": "/eve/v1/(.*)",
+      "destination": { "service": "eve" }
+    },
+    {
+      "source": "/(.*)",
+      "destination": { "service": "web" }
     }
   ]
 }
