@@ -4,7 +4,7 @@ import { defineAgent } from "eve";
 export default defineAgent({
   description:
     "A persistent, authenticated trading copilot for the Harness terminal.",
-  model: deepseek("deepseek-chat"),
+  model: deepseek("deepseek-v4-pro"),
   reasoning: "provider-default",
   compaction: { thresholdPercent: 0.78 },
   build: {
