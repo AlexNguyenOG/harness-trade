@@ -39,7 +39,10 @@ function alertPath(alert: RoutineAlert): string {
 
 function validateCheck(check: RoutineCheck): RoutineCheck {
   if (check.kind === "market_snapshot") {
-    const symbols = [...new Set(check.symbols.map(normalizeSymbol))].slice(0, 8);
+    const symbols = [...new Set(check.symbols.map(normalizeSymbol))].slice(
+      0,
+      8,
+    );
     if (symbols.length === 0) throw new Error("routine-symbols-required");
     return { kind: check.kind, symbols };
   }
@@ -54,7 +57,10 @@ function validateCheck(check: RoutineCheck): RoutineCheck {
 }
 
 function normalizeSymbol(value: string): string {
-  const symbol = value.trim().toUpperCase().replace(/-PERP$/, "");
+  const symbol = value
+    .trim()
+    .toUpperCase()
+    .replace(/-PERP$/, "");
   if (!/^[A-Z0-9._-]{1,16}$/.test(symbol)) {
     throw new Error("routine-symbol-invalid");
   }
@@ -79,11 +85,18 @@ function validateName(value: string): string {
   return name;
 }
 
-function nextAfter(scheduledFor: string, everyMinutes: number, now: Date): string {
+function nextAfter(
+  scheduledFor: string,
+  everyMinutes: number,
+  now: Date,
+): string {
   const interval = everyMinutes * 60_000;
   const scheduled = Date.parse(scheduledFor);
   if (!Number.isFinite(scheduled)) throw new Error("routine-schedule-invalid");
-  const jumps = Math.max(1, Math.floor((now.getTime() - scheduled) / interval) + 1);
+  const jumps = Math.max(
+    1,
+    Math.floor((now.getTime() - scheduled) / interval) + 1,
+  );
   return new Date(scheduled + jumps * interval).toISOString();
 }
 
@@ -99,7 +112,10 @@ export const routineStore = {
     },
   ): Promise<ObserveRoutine> {
     const existing = await this.list(ownerId);
-    if (existing.filter((row) => row.status !== "deleted").length >= MAX_ROUTINES_PER_USER) {
+    if (
+      existing.filter((row) => row.status !== "deleted").length >=
+      MAX_ROUTINES_PER_USER
+    ) {
       throw new Error("routine-limit-reached");
     }
     const firstRunAt = new Date(input.firstRunAt);
@@ -162,7 +178,8 @@ export const routineStore = {
     return await updatePrivateJson<ObserveRoutine>(
       routinePath(ownerId, id),
       (current) => {
-        if (current.ownerId !== ownerId) throw new Error("routine-owner-mismatch");
+        if (current.ownerId !== ownerId)
+          throw new Error("routine-owner-mismatch");
         if (current.status === "deleted") throw new Error("routine-deleted");
         const nextRunAt = patch.nextRunAt
           ? new Date(patch.nextRunAt).toISOString()
@@ -215,11 +232,15 @@ export const routineStore = {
     return true;
   },
 
-  async writeOutcome(run: RoutineRun, alert: RoutineAlert | null): Promise<void> {
+  async writeOutcome(
+    run: RoutineRun,
+    alert: RoutineAlert | null,
+  ): Promise<void> {
     // Deterministic paths make schedule retries converge on the same logical
     // run and alert. These records are observational only.
     await writePrivateJson(runPath(run), run, { overwrite: true });
-    if (alert) await writePrivateJson(alertPath(alert), alert, { overwrite: true });
+    if (alert)
+      await writePrivateJson(alertPath(alert), alert, { overwrite: true });
   },
 
   async completeClaim(

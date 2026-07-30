@@ -33,6 +33,7 @@
       "!!**/node_modules",
       "!!**/dist",
       "!!**/.next",
+      "!!**/.eve",
       "!!**/.svelte-kit",
       "!!**/.vercel",
       "!!**/build",

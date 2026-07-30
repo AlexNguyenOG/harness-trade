@@ -1,10 +1,7 @@
 import { type ApprovalContext, defineTool } from "eve/tools";
 import { z } from "zod";
 import { requireAgentPrincipal, transactionApproval } from "../lib/auth";
-import {
-  executeTrade,
-  type ExecuteTradeInput,
-} from "../lib/trading";
+import { type ExecuteTradeInput, executeTrade } from "../lib/trading";
 
 const symbol = z
   .string()

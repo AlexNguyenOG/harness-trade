@@ -4,7 +4,7 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import type { ToolContext } from "eve/tools";
-import { SOL_MINT, USDC_MINT } from "../../src/lib/funding";
+import { USDC_MINT } from "../../src/lib/funding";
 import {
   buildAddIsolatedMarginIxs,
   buildCancelAllIxs,
@@ -15,7 +15,6 @@ import {
   createSolanaConnection,
   ensureTraderRegisteredIxs,
   fetchPhoenixTraderState,
-  type PhoenixOpenOrder,
   type PhoenixPosition,
   type PhoenixSide,
 } from "../../src/lib/phoenix-trade";

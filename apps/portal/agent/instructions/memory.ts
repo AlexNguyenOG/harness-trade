@@ -20,7 +20,7 @@ export default defineDynamic({
     "turn.started": async (_event, ctx) => {
       const ownerId = authenticatedOwner(ctx);
       if (!ownerId) return null;
-      let memories;
+      let memories: Awaited<ReturnType<typeof memoryStore.list>>;
       try {
         memories = await memoryStore.list(ownerId, { limit: 20 });
       } catch {

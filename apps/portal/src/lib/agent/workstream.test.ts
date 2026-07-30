@@ -36,9 +36,7 @@ describe("projectHarnessTool", () => {
 
     expect(card.kind).toBe("execution");
     expect(card.receipts).toHaveLength(1);
-    expect(card.receipts[0]?.href).toBe(
-      "https://solscan.io/tx/signature",
-    );
+    expect(card.receipts[0]?.href).toBe("https://solscan.io/tx/signature");
   });
 
   test("navigation remains context mutation even with a bad execution hint", () => {

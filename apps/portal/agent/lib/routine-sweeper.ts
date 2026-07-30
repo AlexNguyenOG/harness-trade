@@ -22,7 +22,10 @@ type Claimed = { routine: ObserveRoutine; leaseToken: string };
 
 async function loadCursor(): Promise<string | undefined> {
   try {
-    return (await readPrivateJson<SweepCursor>(CURSOR_PATH))?.value.cursor ?? undefined;
+    return (
+      (await readPrivateJson<SweepCursor>(CURSOR_PATH))?.value.cursor ??
+      undefined
+    );
   } catch {
     return undefined;
   }
@@ -36,10 +39,7 @@ async function saveCursor(cursor: string | undefined): Promise<void> {
   );
 }
 
-async function claim(
-  pathname: string,
-  now: Date,
-): Promise<Claimed | null> {
+async function claim(pathname: string, now: Date): Promise<Claimed | null> {
   const stored = await readPrivateJson<ObserveRoutine>(pathname);
   if (!stored) return null;
   const routine = stored.value;
@@ -212,7 +212,7 @@ export async function sweepObserveRoutines(now = new Date()): Promise<{
   claimed: number;
 }> {
   const cursor = await loadCursor();
-  let page;
+  let page: Awaited<ReturnType<typeof listPrivateObjects>>;
   try {
     page = await listPrivateObjects({
       prefix: `${ROUTINE_ROOT}/`,

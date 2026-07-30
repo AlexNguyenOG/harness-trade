@@ -143,7 +143,7 @@ export function projectHarnessTool(
   const isContext = isContextMutation(toolName, operation, presentation);
   const kind = isContext
     ? "context"
-    : normalizeKind(presentation?.kind) ?? inferKind(toolName, output);
+    : (normalizeKind(presentation?.kind) ?? inferKind(toolName, output));
   const status = normalizeStatus(
     text(presentation?.status) ?? source.state,
     source.approvalPending === true,
@@ -392,8 +392,7 @@ function parseSteps(
       ];
     }
     const row = asRecord(item);
-    const label =
-      text(row?.label) ?? text(row?.title) ?? text(row?.summary);
+    const label = text(row?.label) ?? text(row?.title) ?? text(row?.summary);
     if (!label) return [];
     return [
       {
@@ -415,13 +414,9 @@ function parseReceipts(
         const row = asRecord(item);
         if (!row) return [];
         const href =
-          safeHref(row.explorerUrl) ??
-          safeHref(row.href) ??
-          safeHref(row.url);
+          safeHref(row.explorerUrl) ?? safeHref(row.href) ?? safeHref(row.url);
         const reference =
-          text(row.signature) ??
-          text(row.reference) ??
-          text(row.externalId);
+          text(row.signature) ?? text(row.reference) ?? text(row.externalId);
         return [
           {
             label:
@@ -542,9 +537,7 @@ function displayValue(value: unknown): string | null {
   return null;
 }
 
-function compactFacts(
-  entries: [string, unknown][],
-): WorkstreamFact[] {
+function compactFacts(entries: [string, unknown][]): WorkstreamFact[] {
   return entries.flatMap(([label, value]) => {
     const rendered = displayValue(value);
     return rendered ? [{ label, value: rendered }] : [];
@@ -588,9 +581,7 @@ function formatUsd(value: number): string {
 }
 
 function abbreviate(value: string): string {
-  return value.length > 18
-    ? `${value.slice(0, 8)}…${value.slice(-6)}`
-    : value;
+  return value.length > 18 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
 }
 
 function safeHref(value: unknown): string | undefined {

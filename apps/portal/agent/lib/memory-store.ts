@@ -72,7 +72,8 @@ export const memoryStore = {
       return await updatePrivateJson<PersistentMemory>(
         pathname(ownerId, id),
         (current) => {
-          if (current.ownerId !== ownerId) throw new Error("memory-owner-mismatch");
+          if (current.ownerId !== ownerId)
+            throw new Error("memory-owner-mismatch");
           return {
             ...current,
             kind: input.kind,
@@ -85,9 +86,11 @@ export const memoryStore = {
         },
       );
     }
-    const activeCount = (await this.list(ownerId, {
-      limit: MAX_MEMORIES_PER_USER,
-    })).length;
+    const activeCount = (
+      await this.list(ownerId, {
+        limit: MAX_MEMORIES_PER_USER,
+      })
+    ).length;
     if (activeCount >= MAX_MEMORIES_PER_USER) {
       throw new Error("memory-limit-reached");
     }
@@ -128,13 +131,16 @@ export const memoryStore = {
   },
 
   async forget(ownerId: string, id: string): Promise<boolean> {
-    const stored = await readPrivateJson<PersistentMemory>(pathname(ownerId, id));
+    const stored = await readPrivateJson<PersistentMemory>(
+      pathname(ownerId, id),
+    );
     if (!stored || stored.value.ownerId !== ownerId) return false;
     if (stored.value.status === "forgotten") return true;
     await updatePrivateJson<PersistentMemory>(
       pathname(ownerId, id),
       (current) => {
-        if (current.ownerId !== ownerId) throw new Error("memory-owner-mismatch");
+        if (current.ownerId !== ownerId)
+          throw new Error("memory-owner-mismatch");
         return {
           ...current,
           status: "forgotten",
