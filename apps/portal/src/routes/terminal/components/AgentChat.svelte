@@ -9,6 +9,10 @@
   import { AGENT_MODE_LABEL, type AgentMode } from "$lib/agent/modes";
   import { agentState, getAgentPolicy, setAgentMode, setAgentPaused } from "$lib/agent/state";
   import {
+    projectHarnessTool,
+    type WorkstreamCard,
+  } from "$lib/agent/workstream";
+  import {
     getPrivyAccessToken,
     privyAuth,
   } from "$lib/privy-auth";
@@ -125,47 +129,15 @@
     return "";
   }
 
-  function toolLabel(part: EveDynamicToolPart): string {
-    return String(part.toolName ?? "server action").replaceAll("_", " ");
-  }
-
-  function toolStatus(part: EveDynamicToolPart): string {
-    return String(part.state ?? "running").replaceAll("-", " ");
-  }
-
-  function toolSummary(part: EveDynamicToolPart): string {
-    const output = part.output;
-    if (
-      typeof output === "object" &&
-      output !== null &&
-      "summary" in output
-    ) {
-      return String((output as Record<string, unknown>).summary);
-    }
-    if (part.errorText) return part.errorText;
-    const input = part.input;
-    if (typeof input === "object" && input !== null) {
-      const row = input as Record<string, unknown>;
-      return [row.operation, row.symbol, row.sizeUsd ? `$${row.sizeUsd}` : null]
-        .filter(Boolean)
-        .join(" · ");
-    }
-    return "";
-  }
-
-  function toolLinks(
-    part: EveDynamicToolPart,
-  ): { label: string; href: string }[] {
-    const output = part.output;
-    if (typeof output !== "object" || output === null) return [];
-    const urls = (output as Record<string, unknown>).explorerUrls;
-    if (!Array.isArray(urls)) return [];
-    return urls
-      .filter((url): url is string => typeof url === "string")
-      .map((href, index) => ({
-        label: urls.length > 1 ? `View transaction ${index + 1}` : "View transaction",
-        href,
-      }));
+  function projectPart(part: EveDynamicToolPart): WorkstreamCard {
+    return projectHarnessTool({
+      toolName: part.toolName,
+      state: part.state,
+      input: part.input,
+      output: part.output,
+      errorText: part.errorText,
+      approvalPending: Boolean(part.toolMetadata?.eve?.inputRequest),
+    });
   }
 
   async function answer(requestId: string, approved: boolean): Promise<void> {
@@ -214,6 +186,8 @@
         {/if}
         {#if accountMode === "paper"}
           <span class="tag paper">PAPER</span>
+        {:else}
+          <span class="tag live-wallet">LIVE SERVER WALLET</span>
         {/if}
       </div>
       <div class="picker" role="radiogroup" aria-label="Approval mode">
@@ -286,24 +260,80 @@
             {#if part.type === "text" && partText(part)}
               <span>{partText(part)}</span>
             {:else if isDynamicToolPart(part)}
+              {@const card = projectPart(part)}
               <div
-                class="proposal"
-                class:ask={Boolean(part.toolMetadata?.eve?.inputRequest)}
-                class:done={toolStatus(part).includes("output")}
-                class:failed={toolStatus(part).includes("error") || toolStatus(part).includes("denied")}
-                class:running={toolStatus(part).includes("input") || toolStatus(part).includes("running")}
+                class="work-card"
+                class:context-card={card.kind === "context"}
+                class:waiting-card={card.status === "waiting"}
+                class:success-card={card.tone === "success"}
+                class:danger-card={card.tone === "danger"}
+                class:info-card={card.tone === "info"}
               >
-                <div class="proposal-head">
-                  <span>SERVER</span>
-                  <span>{toolStatus(part)}</span>
+                <div class="work-card-head">
+                  <span>{card.eyebrow}</span>
+                  <span>{card.statusLabel}</span>
                 </div>
-                <p class="proposal-summary">{toolLabel(part)}</p>
-                {#if toolSummary(part)}
-                  <p class="proposal-reason">{toolSummary(part)}</p>
+                <p class="work-title">{card.title}</p>
+                {#if card.summary}
+                  <p class="work-summary">{card.summary}</p>
                 {/if}
-                {#each toolLinks(part) as link}
+
+                {#if card.facts.length > 0}
+                  <dl class="work-facts">
+                    {#each card.facts as fact}
+                      <div>
+                        <dt>{fact.label}</dt>
+                        <dd>{fact.value}</dd>
+                      </div>
+                    {/each}
+                  </dl>
+                {/if}
+
+                {#if card.steps.length > 0}
+                  <ol class="work-steps">
+                    {#each card.steps as step}
+                      <li>
+                        <span
+                          class="step-mark"
+                          class:step-done={step.status === "success"}
+                          class:step-active={step.status === "running" || step.status === "waiting"}
+                          class:step-failed={step.status === "failed" || step.status === "denied"}
+                        ></span>
+                        <span>{step.label}</span>
+                      </li>
+                    {/each}
+                  </ol>
+                {/if}
+
+                {#if card.receipts.length > 0}
+                  <div class="work-receipts">
+                    {#each card.receipts as receipt}
+                      <div class="receipt-row">
+                        <div>
+                          {#if receipt.href}
+                            <a
+                              href={receipt.href}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {receipt.label} ↗
+                            </a>
+                          {:else}
+                            <span>{receipt.label}</span>
+                          {/if}
+                          {#if receipt.reference}
+                            <code>{receipt.reference}</code>
+                          {/if}
+                        </div>
+                        <span>{receipt.status}</span>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+
+                {#each card.links as link}
                   <a
-                    class="tx-link"
+                    class="work-link"
                     href={link.href}
                     target="_blank"
                     rel="noreferrer"
@@ -311,21 +341,31 @@
                     {link.label} ↗
                   </a>
                 {/each}
+
+                {#if card.details.length > 0}
+                  <details class="work-details">
+                    <summary>Details</summary>
+                    {#each card.details as detail}
+                      <p>{detail}</p>
+                    {/each}
+                  </details>
+                {/if}
+
                 {#if part.toolMetadata?.eve?.inputRequest}
-                  <div class="proposal-actions">
+                  <div class="work-actions">
                     <button
                       class="primary"
                       type="button"
                       onclick={() => answerPart(part, true)}
                     >
-                      Approve
+                      {card.kind === "context" ? "Apply" : "Approve"}
                     </button>
                     <button
                       class="ghost"
                       type="button"
                       onclick={() => answerPart(part, false)}
                     >
-                      Deny
+                      {card.kind === "context" ? "Dismiss" : "Deny"}
                     </button>
                   </div>
                 {/if}
@@ -431,24 +471,41 @@
   }
 
   .layout-dock .agent-head {
-    align-items: stretch;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title actions"
+      "modes modes";
+    align-items: center;
     gap: 0.45rem;
     padding: 0.55rem 0.7rem;
   }
 
-  .layout-dock .agent-head-left,
-  .layout-dock .agent-head-right {
+  .layout-dock .agent-head-left {
+    display: contents;
+  }
+
+  .layout-dock .agent-title-row {
+    grid-area: title;
+    min-width: 0;
+  }
+
+  .layout-dock .picker {
+    grid-area: modes;
     width: 100%;
   }
 
-  .layout-dock .agent-head-left {
-    justify-content: space-between;
-    flex-wrap: wrap;
+  .layout-dock .picker button {
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .layout-dock .agent-head-right {
-    justify-content: flex-end;
+    grid-area: actions;
+  }
+
+  .layout-dock .agent-head-right .ghost {
+    min-width: 0;
   }
 
   .agent-head-left,
@@ -492,6 +549,11 @@
     color: var(--amber);
   }
 
+  .tag.live-wallet {
+    color: var(--up);
+    border-color: var(--up);
+  }
+
   .tag.durable {
     color: var(--up);
   }
@@ -530,10 +592,6 @@
     text-align: center;
   }
 
-  .picker.model button {
-    min-width: 3.1rem;
-  }
-
   .picker button:last-child {
     border-right: 0;
   }
@@ -568,19 +626,6 @@
 
   .ghost.pause-on {
     color: var(--red);
-  }
-
-  .agent-banner {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.4rem 0.9rem;
-    border-bottom: 1px solid var(--line-soft);
-    background: var(--surface-2);
-    font-size: 0.72rem;
-    color: var(--amber);
   }
 
   .agent-scroll {
@@ -667,39 +712,39 @@
     padding-left: 0.65rem;
   }
 
-  .pro-tag {
-    display: block;
-    width: fit-content;
-    margin-bottom: 0.25rem;
-    color: var(--accent);
-    font-size: 0.58rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .proposal {
+  .work-card {
+    position: relative;
     border: 1px solid var(--line-soft);
+    border-left: 2px solid var(--line);
     background: var(--surface-2);
-    padding: 0.55rem 0.65rem;
+    padding: 0.52rem 0.62rem;
     display: grid;
-    gap: 0.3rem;
+    gap: 0.34rem;
+    white-space: normal;
   }
 
-  .proposal.ask {
+  .work-card.waiting-card {
     border-color: var(--amber);
   }
-  .proposal.done {
-    border-color: var(--up);
-  }
-  .proposal.failed {
-    border-color: var(--red);
-  }
-  .proposal.running {
-    border-color: var(--accent);
+
+  .work-card.success-card {
+    border-left-color: var(--up);
   }
 
-  .proposal-head {
+  .work-card.danger-card {
+    border-left-color: var(--red);
+  }
+
+  .work-card.info-card {
+    border-left-color: var(--accent);
+  }
+
+  .work-card.context-card {
+    border-left-color: var(--muted);
+    background: transparent;
+  }
+
+  .work-card-head {
     display: flex;
     justify-content: space-between;
     font-size: 0.58rem;
@@ -709,39 +754,163 @@
     color: var(--muted);
   }
 
-  .proposal-summary {
+  .work-title {
     margin: 0;
-    font-size: 0.82rem;
+    color: var(--ink);
+    font-size: 0.8rem;
+    font-weight: 700;
   }
 
-  .proposal-reason,
-  .proposal-error {
+  .work-summary {
     margin: 0;
     font-size: 0.7rem;
+    line-height: 1.42;
     color: var(--muted);
   }
 
-  .proposal-error {
-    color: var(--red);
-  }
-
-  .proposal-actions {
+  .work-facts {
     display: flex;
-    gap: 0.35rem;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin: 0.05rem 0 0;
   }
 
-  .tx-link {
-    width: fit-content;
-    color: var(--accent);
-    font-size: 0.68rem;
-    font-weight: 700;
-    text-decoration: none;
+  .work-facts div {
+    display: inline-flex;
+    gap: 0.25rem;
+    padding: 0.14rem 0.3rem;
+    border: 1px solid var(--line-soft);
+    font-size: 0.62rem;
+  }
+
+  .work-facts dt {
+    color: var(--faint);
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
 
-  .tx-link:hover {
+  .work-facts dd {
+    margin: 0;
+    color: var(--ink);
+  }
+
+  .work-steps {
+    display: grid;
+    gap: 0.24rem;
+    margin: 0.12rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .work-steps li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    color: var(--muted);
+    font-size: 0.68rem;
+    line-height: 1.35;
+  }
+
+  .step-mark {
+    flex: 0 0 auto;
+    width: 0.4rem;
+    height: 0.4rem;
+    margin-top: 0.24rem;
+    border: 1px solid var(--faint);
+    background: transparent;
+  }
+
+  .step-mark.step-done {
+    border-color: var(--up);
+    background: var(--up);
+  }
+
+  .step-mark.step-active {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+
+  .step-mark.step-failed {
+    border-color: var(--red);
+    background: var(--red);
+  }
+
+  .work-receipts {
+    display: grid;
+    margin-top: 0.08rem;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .receipt-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.32rem 0;
+    border-bottom: 1px solid var(--line-soft);
+    color: var(--muted);
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.035em;
+  }
+
+  .receipt-row div {
+    display: flex;
+    align-items: center;
+    gap: 0.42rem;
+    min-width: 0;
+  }
+
+  .receipt-row a,
+  .work-link {
+    width: fit-content;
+    color: var(--accent);
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .receipt-row a:hover,
+  .work-link:hover {
     text-decoration: underline;
+  }
+
+  .receipt-row code {
+    overflow: hidden;
+    color: var(--faint);
+    font: inherit;
+    text-overflow: ellipsis;
+    text-transform: none;
+  }
+
+  .work-link {
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .work-details {
+    color: var(--muted);
+    font-size: 0.66rem;
+  }
+
+  .work-details summary {
+    width: fit-content;
+    color: var(--faint);
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .work-details p {
+    margin: 0.3rem 0 0;
+    line-height: 1.4;
+  }
+
+  .work-actions {
+    display: flex;
+    gap: 0.35rem;
+    padding-top: 0.18rem;
   }
 
   .money-paused {
