@@ -61,6 +61,15 @@
     },
   });
 
+  function buildEveContext(): NonNullable<
+    Parameters<typeof eve.send>[0]["clientContext"]
+  > {
+    // buildDeskContext is the JSON-safe serializer at this client boundary.
+    return buildContext() as NonNullable<
+      Parameters<typeof eve.send>[0]["clientContext"]
+    >;
+  }
+
   const busy = $derived(eve.status === "submitted" || eve.status === "streaming");
   const pendingRequests = $derived(
     eve.data.messages.flatMap((message) =>
@@ -93,7 +102,7 @@
     const text = draft.trim();
     if (!text || busy) return;
     draft = "";
-    void eve.send({ message: text, clientContext: buildContext() });
+    void eve.send({ message: text, clientContext: buildEveContext() });
     inputEl?.focus();
   }
 
@@ -103,7 +112,7 @@
       const text = draft.trim();
       if (busy || !text) return;
       draft = "";
-      void eve.send({ message: text, clientContext: buildContext() });
+      void eve.send({ message: text, clientContext: buildEveContext() });
     }
   }
 
