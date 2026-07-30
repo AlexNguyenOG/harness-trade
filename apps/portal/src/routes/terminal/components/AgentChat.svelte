@@ -496,29 +496,31 @@
   </div>
 
   <form class="composer" onsubmit={submit}>
-    {#if $agentState.paused}
-      <p class="money-paused">Money actions paused · research remains available</p>
-    {/if}
-    <label class="sr-only" for="agent-input">Message the agent</label>
-    <textarea
-      id="agent-input"
-      class="composer-input"
-      bind:this={inputEl}
-      bind:value={draft}
-      rows={layout === "page" ? 3 : 2}
-      placeholder="e.g. long SOL $50 @ 3x market…"
-      disabled={busy || !$privyAuth.authenticated}
-      onkeydown={onKeydown}
-    ></textarea>
-    <div class="composer-bar">
-      <span class="composer-hint">Enter to send · Shift+Enter newline</span>
-      <button
-        class="secondary"
-        type="submit"
-        disabled={busy || !$privyAuth.authenticated || draft.trim().length === 0}
-      >
-        Send
-      </button>
+    <div class="composer-shell">
+      {#if $agentState.paused}
+        <p class="money-paused">Money actions paused · research remains available</p>
+      {/if}
+      <label class="sr-only" for="agent-input">Message the agent</label>
+      <textarea
+        id="agent-input"
+        class="composer-input"
+        bind:this={inputEl}
+        bind:value={draft}
+        rows={layout === "page" ? 3 : 2}
+        placeholder="e.g. long SOL $50 @ 3x market…"
+        disabled={busy || !$privyAuth.authenticated}
+        onkeydown={onKeydown}
+      ></textarea>
+      <div class="composer-bar">
+        <span class="composer-hint">Enter to send · Shift+Enter newline</span>
+        <button
+          class="secondary"
+          type="submit"
+          disabled={busy || !$privyAuth.authenticated || draft.trim().length === 0}
+        >
+          Send
+        </button>
+      </div>
     </div>
   </form>
 </div>
@@ -548,7 +550,8 @@
   .layout-page {
     flex: 1;
     width: 100%;
-    height: 100%;
+    height: auto;
+    overflow: hidden;
     border: 0;
   }
 
@@ -1055,20 +1058,31 @@
 
   .composer {
     flex: 0 0 auto;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
     padding: 0.7rem 0.9rem 0.85rem;
     border-top: 1px solid var(--line-soft);
     background: var(--surface);
   }
 
-  .layout-page .composer {
-    max-width: 48rem;
+  .composer-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
     width: 100%;
-    margin: 0 auto;
-    padding: 0.85rem 1.5rem 1.25rem;
+  }
+
+  .layout-page .composer {
+    position: sticky;
+    z-index: 3;
+    bottom: 0;
+    width: 100%;
+    padding: 0.75rem 1.5rem max(1rem, env(safe-area-inset-bottom));
     border-top: 1px solid var(--line-soft);
+    background: var(--surface);
+  }
+
+  .layout-page .composer-shell {
+    max-width: 48rem;
+    margin: 0 auto;
   }
 
   .composer-input {

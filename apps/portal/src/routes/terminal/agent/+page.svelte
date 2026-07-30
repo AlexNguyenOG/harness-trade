@@ -15,14 +15,10 @@
   );
   let authOpen = $state(false);
 
-  // Keep dock closed while on full page — one surface.
-  $effect(() => {
-    if ($chatState.open) {
-      chatState.update((state) => ({ ...state, open: false }));
-    }
-  });
-
   onMount(() => {
+    // The full page replaces the dock visually, but returning to the terminal
+    // should restore this same conversation in the open dock.
+    chatState.update((state) => ({ ...state, open: true }));
     void initializePrivyAuth();
   });
 
@@ -70,9 +66,11 @@
 
 <style>
   .agent-page {
+    height: 100dvh;
     min-height: 100dvh;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
     background: var(--paper);
     color: var(--ink);
   }
@@ -138,5 +136,6 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
   }
 </style>
