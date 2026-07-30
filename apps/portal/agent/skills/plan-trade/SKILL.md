@@ -1,5 +1,9 @@
 ---
-description: Plan, execute, and verify a trade or position-management request without inventing transaction parameters.
+name: plan-trade
+description: >-
+  Plan, execute, and verify a trade or position-management request without
+  inventing transaction parameters. Use when the user asks to place, open, buy,
+  sell, long, short, close, cancel, reverse, or otherwise change account state.
 ---
 
 # Plan a trade

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   BlobPreconditionFailedError,
+  del,
   get,
   type ListBlobResultBlob,
   list,
@@ -80,6 +81,10 @@ export async function listPrivateObjects(options: {
     ...(options.cursor ? { cursor: options.cursor } : {}),
     token: token(),
   });
+}
+
+export async function deletePrivateObject(pathname: string): Promise<void> {
+  await del(pathname, { token: token() });
 }
 
 export async function updatePrivateJson<T>(

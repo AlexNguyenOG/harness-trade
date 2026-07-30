@@ -6,6 +6,9 @@ const config = {
     adapter: adapter({
       runtime: "nodejs24.x",
     }),
+    alias: {
+      $agent: "agent",
+    },
   },
 };
 
