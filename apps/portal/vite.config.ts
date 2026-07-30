@@ -8,10 +8,21 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const deepseekKey = env.DEEPSEEK_API_KEY?.trim();
   const tokensXyzKey = env.TOKENS_XYZ_API_KEY?.trim();
+  // Windows/local: EVE's Node evaluator rejects extensionless agent imports
+  // that Bun resolves. Set SKIP_EVE=1 to boot the terminal without the agent
+  // runtime (prod/Vercel still uses EVE).
+  const skipEve = env.SKIP_EVE === "1" || process.env.SKIP_EVE === "1";
 
   return {
     envPrefix: ["VITE_", "PUBLIC_", "NEXT_PUBLIC_"],
-    plugins: [eveSvelteKit(), sveltekit()],
+    // configureVercelJson: false — eveSvelteKit still writes legacy
+    // experimentalServices, which Vercel no longer routes for dynamic
+    // /eve/v1/session/:id (+ stream) paths (platform NOT_FOUND). Stable
+    // `services` live in vercel.json and must not be overwritten on build.
+    plugins: [
+      ...(skipEve ? [] : [eveSvelteKit({ configureVercelJson: false })]),
+      sveltekit(),
+    ],
     ssr: { noExternal: ["@harness-trade/ui"] },
     server: {
       proxy: {
