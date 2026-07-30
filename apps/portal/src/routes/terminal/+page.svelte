@@ -6007,6 +6007,7 @@
   // open — its row derivation no longer runs on every mids tick when
   // closed. The page keeps the flag plus venue routing (choosePalette).
   let paletteOpen = false;
+  let agentComposerFocusRequest = 0;
 
   function openPalette(): void {
     paletteOpen = true;
@@ -6014,6 +6015,11 @@
 
   function openAgentDock(): void {
     if (!$chatState.open) toggleChat();
+    agentComposerFocusRequest += 1;
+  }
+
+  $: if (!$chatState.open && agentComposerFocusRequest !== 0) {
+    agentComposerFocusRequest = 0;
   }
 
   function choosePalette(row: PaletteRow): void {
@@ -6989,6 +6995,7 @@
           dockWidth={agentDockWidth}
           minDockWidth={agentDockMinWidth}
           maxDockWidth={agentDockMaxWidth}
+          focusComposerRequest={agentComposerFocusRequest}
           onDockResize={setAgentDockWidth}
           onDockResizeEnd={persistAgentDockWidth}
         />

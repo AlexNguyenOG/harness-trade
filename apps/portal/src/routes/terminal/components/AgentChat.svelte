@@ -27,6 +27,7 @@
     onRequestAuth,
     accountMode = "paper",
     layout = "dock",
+    focusComposerRequest = 0,
     onExpand = undefined,
     onClose = undefined,
   }: {
@@ -34,6 +35,7 @@
     onRequestAuth: () => void;
     accountMode?: "live" | "paper";
     layout?: "dock" | "page";
+    focusComposerRequest?: number;
     onExpand?: () => void;
     onClose?: () => void;
   } = $props();
@@ -41,6 +43,7 @@
   let draft = $state("");
   let scrollEl: HTMLDivElement | null = $state(null);
   let inputEl: HTMLTextAreaElement | null = $state(null);
+  let handledFocusComposerRequest = 0;
   const agentModes: AgentMode[] = ["observe", "ask", "auto"];
   const restoredThread = browser ? loadAgentThread(localStorage) : null;
 
@@ -83,6 +86,19 @@
     void eve.data.messages.length;
     void eve.status;
     scrollEl.scrollTop = scrollEl.scrollHeight;
+  });
+
+  $effect(() => {
+    if (
+      focusComposerRequest <= handledFocusComposerRequest ||
+      !inputEl ||
+      !$privyAuth.authenticated ||
+      busy
+    ) {
+      return;
+    }
+    handledFocusComposerRequest = focusComposerRequest;
+    inputEl.focus();
   });
 
   $effect(() => {

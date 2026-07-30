@@ -11,6 +11,7 @@
     dockWidth,
     minDockWidth,
     maxDockWidth,
+    focusComposerRequest = 0,
     onDockResize,
     onDockResizeEnd,
   }: {
@@ -20,6 +21,7 @@
     dockWidth: number;
     minDockWidth: number;
     maxDockWidth: number;
+    focusComposerRequest?: number;
     onDockResize: (width: number) => void;
     onDockResizeEnd: (width: number) => void;
   } = $props();
@@ -110,6 +112,7 @@
   {buildContext}
   {onRequestAuth}
   {accountMode}
+  {focusComposerRequest}
   layout="dock"
   onExpand={expand}
 />
