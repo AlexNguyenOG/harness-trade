@@ -12,7 +12,7 @@ export interface AgentThreadSnapshot {
 }
 
 export interface AgentPaperActionReceipt {
-  ok: boolean;
+  outcome: "confirmed" | "rejected" | "unknown";
   message: string;
 }
 
@@ -31,15 +31,14 @@ export function loadAgentThread(
 ): AgentThreadSnapshot | null {
   const current = readJson(storage, THREAD_KEY);
   if (isThreadSnapshot(current)) {
+    const paperActionReceipts = parseReceiptMap(current.paperActionReceipts);
     return {
       session: current.session,
       events: current.events,
       ...(Array.isArray(current.paperActionRuns)
         ? { paperActionRuns: current.paperActionRuns }
         : {}),
-      ...(isReceiptMap(current.paperActionReceipts)
-        ? { paperActionReceipts: current.paperActionReceipts }
-        : {}),
+      ...(paperActionReceipts ? { paperActionReceipts } : {}),
     };
   }
 
@@ -74,21 +73,48 @@ export function saveAgentThread(
   );
 }
 
-function isReceiptMap(
+function parseReceiptMap(
   value: unknown,
-): value is Record<string, AgentPaperActionReceipt> {
+): Record<string, AgentPaperActionReceipt> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
+    return null;
   }
-  return Object.values(value).every(
-    (receipt) =>
-      typeof receipt === "object" &&
-      receipt !== null &&
-      "ok" in receipt &&
-      typeof receipt.ok === "boolean" &&
-      "message" in receipt &&
-      typeof receipt.message === "string",
-  );
+  const receipts: Record<string, AgentPaperActionReceipt> = {};
+  for (const [callId, valueReceipt] of Object.entries(value)) {
+    if (
+      typeof valueReceipt !== "object" ||
+      valueReceipt === null ||
+      !("message" in valueReceipt) ||
+      typeof valueReceipt.message !== "string"
+    ) {
+      return null;
+    }
+    if (
+      "outcome" in valueReceipt &&
+      (valueReceipt.outcome === "confirmed" ||
+        valueReceipt.outcome === "rejected" ||
+        valueReceipt.outcome === "unknown")
+    ) {
+      receipts[callId] = {
+        outcome: valueReceipt.outcome,
+        message: valueReceipt.message,
+      };
+      continue;
+    }
+    if ("ok" in valueReceipt && typeof valueReceipt.ok === "boolean") {
+      receipts[callId] = {
+        outcome: valueReceipt.ok
+          ? "confirmed"
+          : valueReceipt.message === UNKNOWN_PAPER_ACTION_MESSAGE
+            ? "unknown"
+            : "rejected",
+        message: valueReceipt.message,
+      };
+      continue;
+    }
+    return null;
+  }
+  return receipts;
 }
 
 export function clearAgentThread(storage: AgentThreadStorage): void {
@@ -116,7 +142,7 @@ export function prepareAgentThreadForResume(
   for (const callId of thread.paperActionRuns ?? []) {
     if (typeof callId !== "string" || paperActionReceipts[callId]) continue;
     paperActionReceipts[callId] = {
-      ok: false,
+      outcome: "unknown",
       message: UNKNOWN_PAPER_ACTION_MESSAGE,
     };
     repaired = true;

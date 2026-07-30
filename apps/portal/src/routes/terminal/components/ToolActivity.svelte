@@ -21,7 +21,15 @@
       ["pending", "running"].includes(item.card.status),
     ),
   );
-  const waiting = $derived(items.some((item) => item.approvalPending));
+  const approvalPending = $derived(
+    items.some((item) => item.approvalPending),
+  );
+  const reconciliationNeeded = $derived(
+    items.some(
+      (item) => item.card.kind === "receipt" && item.card.status === "waiting",
+    ),
+  );
+  const waiting = $derived(approvalPending || reconciliationNeeded);
   const failed = $derived(
     items.some((item) => ["failed", "denied"].includes(item.card.status)),
   );
@@ -38,8 +46,10 @@
         : `Used ${items.length} tools`,
   );
   const statusLabel = $derived(
-    waiting
+    approvalPending
       ? "Approval needed"
+      : reconciliationNeeded
+        ? "Reconciliation needed"
       : running
         ? `${completed}/${items.length}`
         : failed
@@ -85,7 +95,8 @@
             <span
               class="item-mark"
               class:item-running={["pending", "running"].includes(item.card.status)}
-              class:item-waiting={item.approvalPending}
+              class:item-waiting={item.approvalPending ||
+                item.card.status === "waiting"}
               class:item-failed={["failed", "denied"].includes(item.card.status)}
               aria-hidden="true"
             ></span>

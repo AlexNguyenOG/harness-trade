@@ -32,7 +32,7 @@ describe("agent thread cache", () => {
     expect(loadAgentThread(storage)).toEqual(thread);
   });
 
-  test("restores completed client paper actions without replaying them", () => {
+  test("migrates completed legacy paper actions without replaying them", () => {
     const storage = memoryStorage();
     const thread = {
       session: { sessionId: "eve-session-paper" },
@@ -40,12 +40,38 @@ describe("agent thread cache", () => {
       paperActionRuns: ["call-1"],
       paperActionReceipts: {
         "call-1": { ok: true, message: "paper long SOL $10 @ 1x" },
+        "call-2": { ok: false, message: "paper order rejected" },
+        "call-3": {
+          ok: false,
+          message:
+            "Paper action outcome unknown after interruption. Check the paper portfolio before retrying.",
+        },
       },
     };
 
-    saveAgentThread(storage, thread);
+    storage.setItem(
+      "harness.eve.thread.v2",
+      JSON.stringify({ version: 2, ...thread }),
+    );
 
-    expect(loadAgentThread(storage)).toEqual(thread);
+    expect(loadAgentThread(storage)).toEqual({
+      ...thread,
+      paperActionReceipts: {
+        "call-1": {
+          outcome: "confirmed",
+          message: "paper long SOL $10 @ 1x",
+        },
+        "call-2": {
+          outcome: "rejected",
+          message: "paper order rejected",
+        },
+        "call-3": {
+          outcome: "unknown",
+          message:
+            "Paper action outcome unknown after interruption. Check the paper portfolio before retrying.",
+        },
+      },
+    });
   });
 
   test("restores conversations saved by the previous two-key cache", () => {
@@ -155,7 +181,7 @@ describe("agent thread cache", () => {
       paperActionRuns: ["call-complete", "call-interrupted"],
       paperActionReceipts: {
         "call-complete": {
-          ok: true,
+          outcome: "confirmed",
           message: "paper long confirmed",
         },
       },
@@ -163,11 +189,11 @@ describe("agent thread cache", () => {
 
     expect(prepared.paperActionReceipts).toEqual({
       "call-complete": {
-        ok: true,
+        outcome: "confirmed",
         message: "paper long confirmed",
       },
       "call-interrupted": {
-        ok: false,
+        outcome: "unknown",
         message:
           "Paper action outcome unknown after interruption. Check the paper portfolio before retrying.",
       },

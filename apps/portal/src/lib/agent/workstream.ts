@@ -487,6 +487,9 @@ function statusLabelFor(
   kind: WorkstreamKind,
   status: WorkstreamStatus,
 ): string {
+  if (kind === "receipt" && status === "waiting") {
+    return "reconciliation needed";
+  }
   if (kind === "context") {
     if (status === "success") return "updated";
     if (status === "running") return "updating";

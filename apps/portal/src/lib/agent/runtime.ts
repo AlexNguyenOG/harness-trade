@@ -70,8 +70,8 @@ export async function runProposals(
     }
     const result = await executeAgentAction(proposal.name, proposal.args);
     updateProposal(proposal.id, {
-      status: result.ok ? "done" : "failed",
-      error: result.ok ? undefined : result.message,
+      status: result.outcome === "confirmed" ? "done" : "failed",
+      error: result.outcome === "confirmed" ? undefined : result.message,
     });
     recordLedger({
       ts: Date.now(),

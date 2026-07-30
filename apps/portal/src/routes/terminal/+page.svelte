@@ -1620,11 +1620,11 @@
     );
 
   function agentOk(message: string): AgentActionResult {
-    return { ok: true, message };
+    return { outcome: "confirmed", message };
   }
 
   function agentFail(message: string): AgentActionResult {
-    return { ok: false, message };
+    return { outcome: "rejected", message };
   }
 
   function agentNum(value: unknown): number | null {

@@ -60,4 +60,24 @@ describe("projectHarnessTool", () => {
     expect(card.receipts).toHaveLength(0);
     expect(card.steps).toHaveLength(0);
   });
+
+  test("labels an unknown Receipt as reconciliation required", () => {
+    const card = projectHarnessTool({
+      toolName: "execute_trade",
+      state: "output-available",
+      output: {
+        presentation: {
+          schema: "harness.presentation.v1",
+          kind: "receipt",
+          title: "Paper action outcome unknown",
+          summary: "Check the paper portfolio before retrying.",
+          status: "waiting",
+        },
+      },
+    });
+
+    expect(card.kind).toBe("receipt");
+    expect(card.status).toBe("waiting");
+    expect(card.statusLabel).toBe("reconciliation needed");
+  });
 });

@@ -4,7 +4,7 @@
 import type { AgentActionName } from "./actions";
 
 export type AgentActionResult = {
-  ok: boolean;
+  outcome: "confirmed" | "rejected";
   message: string;
 };
 
@@ -34,7 +34,7 @@ export async function executeAgentAction(
   args: Record<string, unknown>,
 ): Promise<AgentActionResult> {
   if (!host) {
-    return { ok: false, message: "agent host not registered" };
+    return { outcome: "rejected", message: "agent host not registered" };
   }
   return executeAgentHostAction(host, name, args);
 }
@@ -46,13 +46,13 @@ export async function executeAgentHostAction(
 ): Promise<AgentActionResult> {
   const handler = handlers[name];
   if (!handler) {
-    return { ok: false, message: `action not wired: ${name}` };
+    return { outcome: "rejected", message: `action not wired: ${name}` };
   }
   try {
     return await handler(args);
   } catch (error) {
     return {
-      ok: false,
+      outcome: "rejected",
       message: error instanceof Error ? error.message : "action-failed",
     };
   }

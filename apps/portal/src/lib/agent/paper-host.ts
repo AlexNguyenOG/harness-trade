@@ -22,10 +22,10 @@ import { PREFS_STORAGE_KEY, parsePrefs } from "$lib/terminal/prefs";
 import type { AgentActionResult, AgentHostHandlers } from "./host";
 
 function ok(message: string): AgentActionResult {
-  return { ok: true, message };
+  return { outcome: "confirmed", message };
 }
 function fail(message: string): AgentActionResult {
-  return { ok: false, message };
+  return { outcome: "rejected", message };
 }
 
 function num(value: unknown): number | null {

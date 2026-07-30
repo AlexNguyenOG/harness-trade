@@ -12,8 +12,9 @@ import {
 } from "eve/svelte";
 import { onMount } from "svelte";
 import { AGENT_ACTION_META, type AgentActionName } from "./actions";
-import type { AgentActionExecutor, AgentActionResult } from "./host";
+import type { AgentActionExecutor } from "./host";
 import {
+  type AgentPaperActionReceipt,
   type AgentThreadSnapshot,
   type AgentThreadStorage,
   clearAgentThread,
@@ -69,7 +70,7 @@ export function createAgentConversation(options: AgentConversationOptions) {
   const restoredThread = cachedThread
     ? prepareAgentThreadForResume(cachedThread)
     : null;
-  let paperActionReceipts = $state<Record<string, AgentActionResult>>({
+  let paperActionReceipts = $state<Record<string, AgentPaperActionReceipt>>({
     ...(restoredThread?.paperActionReceipts ?? {}),
   });
   const paperActionRuns = new Set<string>(

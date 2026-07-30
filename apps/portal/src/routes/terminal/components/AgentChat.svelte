@@ -147,6 +147,22 @@
 
   function projectPart(part: AgentConversationToolPart): WorkstreamCard {
     const paperReceipt = conversation.paperReceipt(part.toolCallId);
+    const receiptPresentation = paperReceipt
+      ? paperReceipt.outcome === "unknown"
+        ? {
+            title: "Paper action outcome unknown",
+            status: "waiting" as const,
+          }
+        : paperReceipt.outcome === "confirmed"
+          ? {
+              title: "Paper action confirmed",
+              status: "success" as const,
+            }
+          : {
+              title: "Paper action rejected",
+              status: "failed" as const,
+            }
+      : null;
     return projectHarnessTool({
       toolName: part.toolName,
       state: part.state,
@@ -156,11 +172,9 @@
             presentation: {
               schema: "harness.presentation.v1",
               kind: "receipt",
-              title: paperReceipt.ok
-                ? "Paper action confirmed"
-                : "Paper action failed",
+              title: receiptPresentation?.title,
               summary: paperReceipt.message,
-              status: paperReceipt.ok ? "success" : "failed",
+              status: receiptPresentation?.status,
             },
           }
         : part.output,
