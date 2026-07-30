@@ -6,7 +6,7 @@ import { getPortfolio } from "../lib/trading";
 
 export default defineTool({
   description:
-    "Read the authenticated user's live EVE wallet, Phoenix collateral, positions, open orders, and durable transaction history. Do not use in paper mode: the current local paper portfolio is already supplied in client context.",
+    "Read the authenticated user's live agent wallet, Phoenix collateral, positions, open orders, and durable transaction history. Do not use in paper mode: the current local paper portfolio is already supplied in client context.",
   inputSchema: z.object({}),
   async execute(_input, ctx) {
     if (requireAgentPrincipal(ctx).accountMode === "paper") {

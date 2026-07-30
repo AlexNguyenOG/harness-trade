@@ -5,7 +5,7 @@ import { memoryStore } from "../lib/memory-store";
 
 export default defineTool({
   description:
-    "Save one explicit, stable fact or preference for the authenticated user across EVE sessions. Never store secrets, credentials, wallet material, serialized transactions, one-time codes, approvals, or short-lived market data.",
+    "Save one explicit, stable fact or preference for the authenticated user across agent sessions. Never store secrets, credentials, wallet material, serialized transactions, one-time codes, approvals, or short-lived market data.",
   inputSchema: z.object({
     key: z
       .string()

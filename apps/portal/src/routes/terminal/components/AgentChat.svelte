@@ -327,7 +327,7 @@
   <header class="agent-head">
     <div class="agent-head-left">
       <div class="agent-title-row">
-        <span class="agent-title">EVE Agent</span>
+        <span class="agent-title">Agent</span>
         <span class="tag durable">
           DURABLE{pendingRequests.length ? ` · ${pendingRequests.length}` : ""}
         </span>
@@ -394,7 +394,7 @@
                 : "Ask mode — every transaction waits for your approval."}
           </p>
           <ul>
-            <li>show my EVE wallet address and balance</li>
+            <li>show my wallet address and balance</li>
             <li>long SOL $50 @ 3x market</li>
             <li>show my live positions and open orders</li>
             <li>move stop to break-even on SOL</li>

@@ -107,7 +107,7 @@ function paperAction(input: ExecuteTradeInput) {
 
 export default defineTool({
   description:
-    "Execute an authenticated paper or live trade, cancellation, close, reversal, TP/SL update, or margin action. Paper actions are handed to the typed client ledger; live actions resolve the signed-in user's isolated EVE wallet and stay server-authoritative. Never accepts wallet ids, keys, or transactions from the model.",
+    "Execute an authenticated paper or live trade, cancellation, close, reversal, TP/SL update, or margin action. Paper actions are handed to the typed client ledger; live actions resolve the signed-in user's isolated agent wallet and stay server-authoritative. Never accepts wallet ids, keys, or transactions from the model.",
   inputSchema,
   approval: (ctx: ApprovalContext<Input>) =>
     transactionApproval({
