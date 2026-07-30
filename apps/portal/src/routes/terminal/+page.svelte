@@ -76,6 +76,15 @@
     walletFundsLabel,
   } from "$lib/terminal/account-format";
   import {
+    AGENT_DOCK_DEFAULT_WIDTH,
+    AGENT_DOCK_MAX_WIDTH,
+    AGENT_DOCK_MIN_WIDTH,
+    AGENT_DOCK_STORAGE_KEY,
+    agentDockWidthBounds,
+    clampAgentDockWidth,
+    parseAgentDockWidth,
+  } from "$lib/terminal/agent-dock";
+  import {
     BOOK_LADDER_LEVELS,
     BOOK_LADDER_LEVELS_STACKED,
     formatBookPrice,
@@ -163,6 +172,12 @@
   } from "$lib/intel";
   import { chatState, closeChat, toggleChat } from "$lib/chat";
   import { buildDeskContext } from "$lib/chat-context";
+  import {
+    registerAgentHost,
+    unregisterAgentHost,
+    type AgentActionResult,
+  } from "$lib/agent/host";
+  import { agentState } from "$lib/agent/state";
   import { fetchMintSafety, fetchSolanaLamports, solanaRpcUrl } from "$lib/solana-rpc";
   import { swrRead, swrWrite } from "$lib/swr";
   import {
@@ -260,7 +275,10 @@
     toCandle,
     toVolume,
   } from "$lib/terminal/chart-format";
-  import type { PaletteRow } from "$lib/terminal/palette";
+  import {
+    isPaletteShortcut,
+    type PaletteRow,
+  } from "$lib/terminal/palette";
   import {
     CandlestickSeries,
     ColorType,
@@ -689,6 +707,45 @@
   // breakpoint where the grid collapses, so markup and CSS agree. The tape
   // shares the ladder slot up top (all three don't fit vertically).
   let stackedBook = false;
+  // Agent dock open → compress terminal into the narrow/responsive layout
+  // (tabbed book/ticket, single-column chart stack) in the remaining width.
+  $: chatOpen = $chatState.open;
+  $: layoutStackedBook = stackedBook && !chatOpen;
+  let agentDockPreferredWidth = AGENT_DOCK_DEFAULT_WIDTH;
+  let agentDockWidth = AGENT_DOCK_DEFAULT_WIDTH;
+  let agentDockMinWidth = AGENT_DOCK_MIN_WIDTH;
+  let agentDockMaxWidth = AGENT_DOCK_MAX_WIDTH;
+
+  function syncAgentDockWidth(): void {
+    if (!browser) return;
+    const bounds = agentDockWidthBounds(window.innerWidth);
+    agentDockMinWidth = bounds.min;
+    agentDockMaxWidth = bounds.max;
+    agentDockWidth = clampAgentDockWidth(
+      agentDockPreferredWidth,
+      window.innerWidth,
+    );
+  }
+
+  function setAgentDockWidth(width: number): void {
+    agentDockPreferredWidth = Math.min(
+      AGENT_DOCK_MAX_WIDTH,
+      Math.max(AGENT_DOCK_MIN_WIDTH, width),
+    );
+    syncAgentDockWidth();
+  }
+
+  function persistAgentDockWidth(width: number): void {
+    setAgentDockWidth(width);
+    try {
+      localStorage.setItem(
+        AGENT_DOCK_STORAGE_KEY,
+        String(Math.round(agentDockPreferredWidth)),
+      );
+    } catch {
+      // Local persistence is best-effort in private or quota-limited browsers.
+    }
+  }
   // Chart footer density: measured against the chart panel width so shrinking
   // the window (or the book eating space) swaps the long date range out
   // before it crushes the controls.
@@ -1057,7 +1114,7 @@
   $: spread = asks[0] && bids[0] ? asks[0].price - bids[0].price : 0;
   $: spreadBps = latestPrice && latestPrice > 0 ? (spread / latestPrice) * 10_000 : 0;
   $: spreadPercent = latestPrice && latestPrice > 0 ? (spread / latestPrice) * 100 : 0;
-  $: ladderLevelCap = stackedBook
+  $: ladderLevelCap = layoutStackedBook
     ? BOOK_LADDER_LEVELS_STACKED
     : BOOK_LADDER_LEVELS;
   $: visibleAskLevels = asks.slice(0, ladderLevelCap).reverse();
@@ -1139,7 +1196,7 @@
     fundingPercent,
     tradeOpen,
     perpsMode: tradeMode === "perps",
-    stackedBook,
+    stackedBook: layoutStackedBook,
     tradeTab: bookTab === "trade",
     hasAuthority: Boolean(phoenixAuthority) || paperMode,
     stateKnown: phoenixStateKnown,
@@ -1255,6 +1312,15 @@
       freeCollateralUsd: phoenixCollateral,
     };
   }
+
+  // Harness UI: when the agent dock is open, suppress legacy AiReadLine chrome
+  // so the side panel is the single AI surface (Cursor-like).
+  $: harnessCompact = $agentState.harnessUi && $chatState.open;
+  $: viewFundingRead = harnessCompact ? IDLE_READ : fundingRead;
+  $: viewBriefRead = harnessCompact ? IDLE_READ : briefRead;
+  $: viewScannerRead = harnessCompact ? IDLE_READ : scannerRead;
+  $: viewRecapRead = harnessCompact ? IDLE_READ : recapRead;
+  $: viewEventRead = harnessCompact ? IDLE_READ : eventRead;
 
   // Side-chat grounding snapshot (PRD #563, WP2 serializer): assembled at
   // send time from the page's live state so the model always sees the current
@@ -1553,7 +1619,329 @@
       displayTimezone,
     );
 
+  function agentOk(message: string): AgentActionResult {
+    return { outcome: "confirmed", message };
+  }
+
+  function agentFail(message: string): AgentActionResult {
+    return { outcome: "rejected", message };
+  }
+
+  function agentNum(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }
+
+  function applyAgentTicketFields(args: Record<string, unknown>): void {
+    if (args.side === "buy" || args.side === "sell") $tradeSide = args.side;
+    if (args.orderType === "market" || args.orderType === "limit") {
+      $tradeType = args.orderType;
+    }
+    const sizeUsd = agentNum(args.sizeUsd);
+    if (sizeUsd !== null && sizeUsd > 0) {
+      $sizingMode = "usd";
+      $tradeAmount = String(sizeUsd);
+    }
+    const leverage = agentNum(args.leverage);
+    if (leverage !== null && leverage > 0) $tradeLeverage = leverage;
+    const limitPrice = agentNum(args.limitPrice);
+    if (limitPrice !== null && limitPrice > 0) {
+      $tradeLimitPrice = String(limitPrice);
+    }
+    const takeProfit = agentNum(args.takeProfit);
+    if (takeProfit !== null && takeProfit > 0) {
+      $tradeTakeProfit = String(takeProfit);
+    }
+    const stopLoss = agentNum(args.stopLoss);
+    if (stopLoss !== null && stopLoss > 0) {
+      $tradeStopLoss = String(stopLoss);
+    }
+    if (typeof args.reduceOnly === "boolean") {
+      $tradeReduceOnly = args.reduceOnly;
+    }
+  }
+
+  function wireAgentHost(): void {
+    registerAgentHost({
+      switch_market: async (args) => {
+        const symbol =
+          typeof args.symbol === "string" ? args.symbol.toUpperCase() : "";
+        if (!symbol) return agentFail("symbol required");
+        if (tradeMode !== "perps") setTradeMode("perps", false);
+        await switchPhoenixMarket(symbol);
+        return agentOk(`market ${symbol}`);
+      },
+      set_timeframe: (args) => {
+        const tf = args.timeframe;
+        if (
+          typeof tf !== "string" ||
+          !PHOENIX_TIMEFRAMES.includes(tf as PhoenixTimeframe)
+        ) {
+          return agentFail("invalid timeframe");
+        }
+        selectedTimeframe = tf as PhoenixTimeframe;
+        return agentOk(`timeframe ${tf}`);
+      },
+      set_ticket: (args) => {
+        applyAgentTicketFields(args);
+        tradeOpen = true;
+        return agentOk("ticket updated");
+      },
+      place_perp_order: async (args) => {
+        if (typeof args.symbol === "string" && args.symbol) {
+          const symbol = args.symbol.toUpperCase();
+          if (symbol !== selectedSymbol) {
+            if (tradeMode !== "perps") setTradeMode("perps", false);
+            await switchPhoenixMarket(symbol);
+          }
+        }
+        applyAgentTicketFields(args);
+        if (paperMode) await submitPaperOrder();
+        else await submitPhoenixOrder();
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk("perp order submitted");
+      },
+      place_spot_order: async (args) => {
+        if (tradeMode !== "spot") setTradeMode("spot", false);
+        applyAgentTicketFields(args);
+        await submitSpotLimitOrder();
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk("spot order submitted");
+      },
+      cancel_order: async (args) => {
+        const orderId = typeof args.orderId === "string" ? args.orderId : "";
+        if (!orderId) return agentFail("orderId required");
+        if (args.venue === "spot") {
+          if (paperMode) {
+            paperLedger.set(cancelPaperSpotLimit($paperLedger, orderId));
+            return agentOk("paper spot cancelled");
+          }
+          await cancelSpotLimitOrder(orderId);
+          return agentOk("spot cancel sent");
+        }
+        if (paperMode) {
+          paperLedger.set(cancelPaperOrder($paperLedger, orderId));
+          return agentOk("paper order cancelled");
+        }
+        const order = perpOpenOrders.find(
+          (row) => row.orderSequenceNumber === orderId,
+        );
+        if (!order) return agentFail("order not found");
+        await cancelPhoenixOrderById(order);
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk("cancelled");
+      },
+      cancel_symbol_orders: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const side = args.side;
+        if (paperMode) {
+          let next = $paperLedger;
+          if (side === "buy" || side === "sell") {
+            next = cancelPaperOrdersOnSide(
+              next,
+              symbol,
+              side === "buy" ? "bid" : "ask",
+            );
+          } else {
+            next = cancelPaperOrdersOnSide(next, symbol, "bid");
+            next = cancelPaperOrdersOnSide(next, symbol, "ask");
+          }
+          paperLedger.set(next);
+          return agentOk("paper orders cancelled");
+        }
+        if (side === "buy") await cancelPhoenixOrders(symbol, "bid");
+        else if (side === "sell") await cancelPhoenixOrders(symbol, "ask");
+        else await cancelSymbolBookOrders(symbol);
+        return agentOk("orders cancelled");
+      },
+      close_position: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const sub =
+          agentNum(args.subaccountIndex) ??
+          enrichedPositions.find((p) => p.symbol === symbol)?.subaccountIndex ??
+          0;
+        const position = enrichedPositions.find(
+          (row) => row.symbol === symbol && row.subaccountIndex === sub,
+        );
+        if (!position) return agentFail("position not found");
+        await closePhoenixPosition(symbol, position.size, sub, 1);
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk(`closed ${symbol}`);
+      },
+      close_position_fraction: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const fraction = agentNum(args.fraction);
+        if (fraction === null || fraction <= 0 || fraction > 1) {
+          return agentFail("fraction must be in (0,1]");
+        }
+        const sub =
+          agentNum(args.subaccountIndex) ??
+          enrichedPositions.find((p) => p.symbol === symbol)?.subaccountIndex ??
+          0;
+        const position = enrichedPositions.find(
+          (row) => row.symbol === symbol && row.subaccountIndex === sub,
+        );
+        if (!position) return agentFail("position not found");
+        await closePhoenixPosition(symbol, position.size, sub, fraction);
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk(`closed ${Math.round(fraction * 100)}% ${symbol}`);
+      },
+      close_all_positions: async () => {
+        if (paperMode) {
+          flattenPaperPositions();
+          return agentOk("all paper positions closed");
+        }
+        await closeAllPhoenixPositions();
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk("flatten submitted");
+      },
+      set_tp_sl: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const sub =
+          agentNum(args.subaccountIndex) ??
+          enrichedPositions.find((p) => p.symbol === symbol)?.subaccountIndex ??
+          0;
+        const tp =
+          args.takeProfit === null
+            ? null
+            : agentNum(args.takeProfit);
+        const sl =
+          args.stopLoss === null ? null : agentNum(args.stopLoss);
+        if (paperMode) {
+          paperLedger.set(
+            setPaperTpSl($paperLedger, symbol, sub, {
+              ...(tp !== undefined ? { takeProfitPrice: tp } : {}),
+              ...(sl !== undefined ? { stopLossPrice: sl } : {}),
+            }),
+          );
+          return agentOk("paper tp/sl set");
+        }
+        // Live: fill ticket fields and surface the ticket for signed TP/SL
+        // flows that already exist on the position row UI.
+        if (tp !== null && tp !== undefined) $tradeTakeProfit = String(tp);
+        if (sl !== null && sl !== undefined) $tradeStopLoss = String(sl);
+        tradeOpen = true;
+        return agentOk("tp/sl drafted on ticket — confirm via position UI if live");
+      },
+      set_break_even: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const position = enrichedPositions.find((row) => row.symbol === symbol);
+        if (!position?.entryPrice) return agentFail("no entry for break-even");
+        if (paperMode) {
+          paperLedger.set(
+            setPaperTpSl($paperLedger, symbol, position.subaccountIndex, {
+              stopLossPrice: position.entryPrice,
+            }),
+          );
+          return agentOk("paper stop at break-even");
+        }
+        $tradeStopLoss = String(position.entryPrice);
+        tradeOpen = true;
+        return agentOk("break-even stop drafted");
+      },
+      reverse_position: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const position = enrichedPositions.find((row) => row.symbol === symbol);
+        if (!position) return agentFail("position not found");
+        const notional = Math.abs(position.size) * (position.entryPrice ?? 0);
+        await closePhoenixPosition(
+          symbol,
+          position.size,
+          position.subaccountIndex,
+          1,
+        );
+        $tradeSide = position.size > 0 ? "sell" : "buy";
+        $tradeType = "market";
+        if (notional > 0) {
+          $sizingMode = "usd";
+          $tradeAmount = String(notional);
+        }
+        if (paperMode) await submitPaperOrder();
+        else await submitPhoenixOrder();
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk(`reversed ${symbol}`);
+      },
+      add_margin: async (args) => {
+        const symbol =
+          typeof args.symbol === "string"
+            ? args.symbol.toUpperCase()
+            : selectedSymbol;
+        const amount = agentNum(args.amountUsd);
+        if (amount === null || amount <= 0) return agentFail("amountUsd required");
+        const position = enrichedPositions.find((row) => row.symbol === symbol);
+        if (!position) return agentFail("position not found");
+        if (paperMode) {
+          paperLedger.set(
+            addPaperMargin(
+              $paperLedger,
+              symbol,
+              position.subaccountIndex,
+              amount,
+            ),
+          );
+          return agentOk("paper margin added");
+        }
+        marginAddValue = String(amount);
+        await submitMarginAdd(position);
+        if (phoenixActionError) return agentFail(phoenixActionError);
+        return agentOk("margin add submitted");
+      },
+      watchlist_add: (args) => {
+        const symbol =
+          typeof args.symbol === "string" ? args.symbol.toUpperCase() : "";
+        if (!symbol) return agentFail("symbol required");
+        if (!watchlist.includes(symbol)) watchlist = [...watchlist, symbol];
+        return agentOk(`watch +${symbol}`);
+      },
+      watchlist_remove: (args) => {
+        const symbol =
+          typeof args.symbol === "string" ? args.symbol.toUpperCase() : "";
+        if (!symbol) return agentFail("symbol required");
+        watchlist = watchlist.filter((row) => row !== symbol);
+        return agentOk(`watch -${symbol}`);
+      },
+      set_agent_pause: (args) => {
+        // State already toggled in runtime before host call.
+        return agentOk(args.paused === true ? "paused" : "resumed");
+      },
+    });
+  }
+
   onMount(() => {
+    try {
+      const savedDockWidth = parseAgentDockWidth(
+        localStorage.getItem(AGENT_DOCK_STORAGE_KEY),
+      );
+      if (savedDockWidth !== null) agentDockPreferredWidth = savedDockWidth;
+    } catch {
+      // Keep the default width when local storage is unavailable.
+    }
+    syncAgentDockWidth();
+    const onAgentDockViewportResize = () => syncAgentDockWidth();
+    window.addEventListener("resize", onAgentDockViewportResize);
+
     loadOpenBetaBanner();
     loadPrefs();
     applyDeepLink(); // ?asset=&venue=&side=… — overrides restored prefs
@@ -1563,6 +1951,7 @@
     const panelsWarm = hydrateWidgetCache();
     prefsReady = true;
     createChartInstance();
+    wireAgentHost();
     void bootPhoenixMarketData();
     void fetchUsdFxRates().then((rates) => {
       fxRates = rates;
@@ -1673,10 +2062,12 @@
     }, 200);
 
     return () => {
+      unregisterAgentHost();
       phoenixStream?.close();
       window.cancelAnimationFrame(bookFrame);
       document.removeEventListener("visibilitychange", onVisible);
       stopPaperPnlLog();
+      window.removeEventListener("resize", onAgentDockViewportResize);
       stackMq.removeEventListener("change", onStackMq);
       footerRo?.disconnect();
       window.clearInterval(footerWatchTimer);
@@ -5616,9 +6007,19 @@
   // open — its row derivation no longer runs on every mids tick when
   // closed. The page keeps the flag plus venue routing (choosePalette).
   let paletteOpen = false;
+  let agentComposerFocusRequest = 0;
 
   function openPalette(): void {
     paletteOpen = true;
+  }
+
+  function openAgentDock(): void {
+    if (!$chatState.open) toggleChat();
+    agentComposerFocusRequest += 1;
+  }
+
+  $: if (!$chatState.open && agentComposerFocusRequest !== 0) {
+    agentComposerFocusRequest = 0;
   }
 
   function choosePalette(row: PaletteRow): void {
@@ -5715,7 +6116,13 @@
       if (cheatOpen) cheatOpen = false;
       if ($chatState.open && !modalOwned) closeChat();
     }
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const paletteShortcut = isPaletteShortcut(event);
+    if (
+      (event.metaKey || event.ctrlKey || event.altKey) &&
+      !paletteShortcut
+    ) {
+      return;
+    }
     const target = event.target;
     if (
       target instanceof HTMLElement &&
@@ -5772,7 +6179,7 @@
       toggleChat();
       return;
     }
-    if (event.key === "/") {
+    if (paletteShortcut) {
       event.preventDefault();
       openPalette();
       return;
@@ -5861,7 +6268,11 @@
 
 <svelte:window onkeydown={onGlobalKeydown} />
 
-<main class="terminal-shell">
+<main
+  class="terminal-shell"
+  class:chat-open={chatOpen}
+  style={`--topbar-h: ${topbarHeight || 48}px; --status-h: 1.9rem;${chatOpen ? ` --agent-dock-w: ${agentDockWidth}px;` : ""}`}
+>
   <a class="skip-link" href="#terminal-content">Skip to terminal content</a>
 
   <Topbar
@@ -5929,7 +6340,6 @@
     {tradeMode}
     {selectedSymbol}
     {watchlist}
-    {news}
     {activeSection}
     {topbarHeight}
     bind:railHeight={marketRailHeight}
@@ -5943,8 +6353,8 @@
   <section
     id="terminal-content"
     class="dashboard"
-    class:chat-open={$chatState.open}
-    style={`--anchor-top: ${(stackedBook ? topbarHeight : 0) + marketRailHeight}px;`}
+    class:chat-open={chatOpen}
+    style={`--anchor-top: ${(layoutStackedBook ? topbarHeight : 0) + marketRailHeight}px;`}
   >
     <!-- Chart column: chart stacked over the dock (Hyperliquid posture) —
          the dock's height is independent of the taller ticket rail. -->
@@ -6354,7 +6764,7 @@
             displayTimezone={displayTimezone}
             {journalEntries}
             {journalToday}
-            {recapRead}
+            recapRead={viewRecapRead}
             {sessionPnlUsd}
             onwipe={wipeJournal}
           />
@@ -6388,7 +6798,7 @@
     </div>
 
     <section id="section-book" class="panel orderbook-panel">
-      {#if stackedBook}
+      {#if layoutStackedBook}
         <!-- Desktop: ticket + ladder stack (Hyperliquid order) — the ticket
              owns the top of the rail so entry controls are always visible;
              the book/tape reads below it. The tape shares the ladder slot
@@ -6533,8 +6943,8 @@
       {sessionPnlUsd}
       {sessionPnlPct}
       {equityValues}
-      {fundingRead}
-      {briefRead}
+      fundingRead={viewFundingRead}
+      briefRead={viewBriefRead}
       actionError={phoenixActionError}
       actionErrorDetail={phoenixActionErrorDetail}
       actionRetry={phoenixActionRetry}
@@ -6581,6 +6991,13 @@
           this={module.default}
           buildContext={buildDeskContextClosure}
           onRequestAuth={openAuthModal}
+          accountMode={paperMode ? "paper" : "live"}
+          dockWidth={agentDockWidth}
+          minDockWidth={agentDockMinWidth}
+          maxDockWidth={agentDockMaxWidth}
+          focusComposerRequest={agentComposerFocusRequest}
+          onDockResize={setAgentDockWidth}
+          onDockResizeEnd={persistAgentDockWidth}
         />
       {/await}
     {/if}
@@ -6691,6 +7108,7 @@
           apply: applyLastOrderIntent,
         }
       : null}
+    onopenagent={openAgentDock}
     onselect={choosePalette}
     ontogglewatch={toggleWatch}
     onclose={() => (paletteOpen = false)}
@@ -6836,7 +7254,7 @@
     {lastTradeSignature}
     {txStageText}
     {tradeOpen}
-    {stackedBook}
+    stackedBook={layoutStackedBook}
     onsubmit={onPerpSubmitClick}
     onopenauth={openAuthModal}
     onopenfunds={openPhoenixFunding}
@@ -6854,6 +7272,27 @@
       linear-gradient(180deg, rgba(255, 77, 151, 0.04), transparent 28rem),
       var(--paper);
     color: var(--ink);
+  }
+
+  /* Agent dock open: the shell's clamped --agent-dock-w leaves a right
+     gutter for the full-height panel and compresses the terminal. */
+  .terminal-shell.chat-open .dashboard,
+  .terminal-shell.chat-open .terminal-notice {
+    margin-right: var(--agent-dock-w);
+  }
+
+  /* Market rail shrinks with the dashboard so chrome doesn't run under dock. */
+  .terminal-shell.chat-open :global(.ticker-rail) {
+    margin-right: var(--agent-dock-w);
+  }
+
+  /* On already-narrow viewports the agent is a full sheet — no gutter. */
+  @media (max-width: 1100px) {
+    .terminal-shell.chat-open .dashboard,
+    .terminal-shell.chat-open .terminal-notice,
+    .terminal-shell.chat-open :global(.ticker-rail) {
+      margin-right: 0;
+    }
   }
 
   .skip-link {
@@ -7043,15 +7482,29 @@
     padding: clamp(0.75rem, 1.4vw, 1.15rem);
   }
 
-  /* Side-chat dock (PRD #563, WP3): when the panel is open the main grid
-     gains a 380px right track for the dock while the existing 12-col content
-     stays intact. Closed = class absent = repeat(12, …) unchanged, so the
-     layout is byte-identical. Below the dock's mobile breakpoint the panel
-     goes fixed-sheet, so no track is reserved there. */
-  @media (min-width: 1101px) {
-    .dashboard.chat-open {
-      grid-template-columns: repeat(12, minmax(0, 1fr)) 380px;
-    }
+  /* Agent dock reserves space via margin-right on .terminal-shell.chat-open
+     (see above) — no extra grid track. When open, force the narrow layout
+     so chart/book stack in the remaining width. */
+  .dashboard.chat-open .chart-col {
+    display: contents;
+  }
+
+  .dashboard.chat-open .chart-panel,
+  .dashboard.chat-open .orderbook-panel {
+    grid-column: 1 / -1;
+  }
+
+  .dashboard.chat-open .chart-panel {
+    height: clamp(22rem, 48vh, 34rem);
+  }
+
+  .dashboard.chat-open .orderbook-panel {
+    height: auto;
+    max-height: 28rem;
+  }
+
+  .dashboard.chat-open .macro-panel {
+    grid-column: span 6;
   }
 
   .chart-panel {
@@ -7219,6 +7672,7 @@
   .chart-canvas-shell {
     position: relative;
     min-height: 0;
+    container-type: inline-size;
     background: var(--chart-bg);
     overflow: hidden;
   }
@@ -7231,11 +7685,17 @@
     place-items: center;
     pointer-events: none;
     color: var(--accent);
-    font-size: clamp(3.5rem, 12vw, 7rem);
+    font-size: clamp(2.75rem, 16cqw, 7rem);
     font-weight: 900;
     letter-spacing: 0.18em;
     opacity: 0.07;
     user-select: none;
+  }
+
+  @container (max-width: 420px) {
+    .paper-watermark {
+      letter-spacing: 0.1em;
+    }
   }
 
   .chart-overlay {

@@ -128,12 +128,14 @@
 <style>
   .close-preview {
     max-width: 22rem;
+    max-height: calc(100dvh - 2rem);
   }
 
   .modal-body {
     display: flex;
     flex-direction: column;
     gap: 0.55rem;
+    min-width: 0;
     padding: 0.85rem 1rem 0.4rem;
   }
 
@@ -147,8 +149,11 @@
   }
 
   .row b {
+    min-width: 0;
     color: var(--ink);
     font-weight: 700;
+    overflow-wrap: anywhere;
+    text-align: right;
   }
 
   .row.pnl b {
@@ -168,5 +173,22 @@
     justify-content: flex-end;
     gap: 0.5rem;
     padding: 0.75rem 1rem 1rem;
+  }
+
+  @media (max-width: 480px) {
+    .close-preview {
+      max-height: calc(100dvh - 1.5rem);
+    }
+
+    .modal-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .modal-actions button {
+      min-width: 0;
+      height: auto;
+      white-space: normal;
+    }
   }
 </style>

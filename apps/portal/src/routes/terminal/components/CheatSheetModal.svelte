@@ -24,7 +24,7 @@
     </div>
     <div class="modal-body cheat-body">
       {#each [
-        ["/", "Market palette"],
+        ["/ · ⌘K", "Market and command palette"],
         ["B / S", "Long / Short — flips a live ticket in place"],
         ["M / L", "Ticket order type market / limit"],
         ["C C", "Market-close the selected position (press twice)"],

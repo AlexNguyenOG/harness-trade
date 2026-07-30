@@ -56,16 +56,16 @@
 </script>
 
 <footer class="status-line" aria-label="Terminal status">
-  <span class="mono"
+  <span class="mono sl-clock"
     >{formatClockInZone(status.clockMs, status.displayTimezone)}</span
   >
   <span class="sl-sep" aria-hidden="true"></span>
-  <span>{status.symbol} · {status.sessionNote}</span>
+  <span class="sl-session">{status.symbol} · {status.sessionNote}</span>
   <span class="sl-sep" aria-hidden="true"></span>
   {#if streamNeedsHelp && onreconnect}
     <button
       type="button"
-      class="sl-reconnect warn-txt"
+      class="sl-reconnect sl-stream warn-txt"
       title="Reconnect market data"
       onclick={onreconnect}
     >
@@ -73,25 +73,30 @@
     </button>
   {:else}
     <span
+      class="sl-stream"
       class:positive={status.streamHealth === "live"}
       class:warn-txt={status.streamHealth !== "live"}
     >WS {status.streamHealth}</span>
   {/if}
-  <span>RPC {status.rpcLatencyMs !== null ? `${status.rpcLatencyMs}ms` : "--"}</span>
+  <span class="sl-rpc">RPC {status.rpcLatencyMs !== null ? `${status.rpcLatencyMs}ms` : "--"}</span>
   {#if status.apiSlotLag !== null}
-    <span class:warn-txt={status.apiSlotLag > 150} title="Phoenix indexer slots behind the chain tip">
+    <span
+      class="sl-sync"
+      class:warn-txt={status.apiSlotLag > 150}
+      title="Phoenix indexer slots behind the chain tip"
+    >
       SYNC −{status.apiSlotLag}
     </span>
   {/if}
   {#if status.lastTx}
     <span class="sl-sep" aria-hidden="true"></span>
-    <span class="mono" class:warn-txt={status.lastTx.failed}>
+    <span class="mono sl-transient" class:warn-txt={status.lastTx.failed}>
       TX {status.lastTx.label} · {status.lastTx.text}
     </span>
   {/if}
   {#if status.armedHotkey}
     <span class="sl-sep" aria-hidden="true"></span>
-    <span class="warn-txt">
+    <span class="sl-transient warn-txt">
       {status.armedHotkey.key === "c"
         ? `press C again to market-close ${status.selectedSymbol}`
         : `press X again to cancel ${status.selectedSymbol} orders`}
@@ -100,69 +105,76 @@
   <span class="sl-grow" aria-hidden="true"></span>
   {#if status.showMoney}
     <!-- Money at a glance, always: the segment jumps to the perp desk. -->
-    <button
-      type="button"
-      class="sl-money"
-      title="Jump to positions"
-      onclick={onjumptopositions}
-    >
-      <span
-        class="paper-badge"
-        class:on={status.paperMode}
-        title={status.paperMode ? "Simulated balance on live prices" : undefined}
-        aria-hidden={!status.paperMode}
+    <div class="sl-money-scroll">
+      <button
+        type="button"
+        class="sl-money"
+        title="Jump to positions"
+        onclick={onjumptopositions}
       >
-        PAPER
-      </span>
-      <span
-        >EQ {formatDisplayMoney(
-          status.equityUsd,
-          status.displayCurrency,
-          status.fxRate,
-          0,
-        )}</span
-      >
-      {#if status.sessionPnlUsd !== null}
         <span
-          class:positive={status.sessionPnlUsd >= 0}
-          class:negative={status.sessionPnlUsd < 0}
-          title="Today vs UTC-day equity baseline"
+          class="paper-badge"
+          class:on={status.paperMode}
+          title={status.paperMode ? "Simulated balance on live prices" : undefined}
+          aria-hidden={!status.paperMode}
         >
-          Today {formatDisplayMoneySigned(
-            status.sessionPnlUsd,
+          PAPER
+        </span>
+        <span
+          >EQ {formatDisplayMoney(
+            status.equityUsd,
+            status.displayCurrency,
+            status.fxRate,
+            0,
+          )}</span
+        >
+        {#if status.sessionPnlUsd !== null}
+          <span
+            class:positive={status.sessionPnlUsd >= 0}
+            class:negative={status.sessionPnlUsd < 0}
+            title="Today vs UTC-day equity baseline"
+          >
+            Today {formatDisplayMoneySigned(
+              status.sessionPnlUsd,
+              status.displayCurrency,
+              status.fxRate,
+              2,
+            )}
+          </span>
+        {/if}
+        <span class:positive={status.upnlUsd >= 0} class:negative={status.upnlUsd < 0}>
+          uPNL {formatDisplayMoneySigned(
+            status.upnlUsd,
             status.displayCurrency,
             status.fxRate,
             2,
           )}
         </span>
-      {/if}
-      <span class:positive={status.upnlUsd >= 0} class:negative={status.upnlUsd < 0}>
-        uPNL {formatDisplayMoneySigned(
-          status.upnlUsd,
-          status.displayCurrency,
-          status.fxRate,
-          2,
-        )}
-      </span>
-      <span
-        >FREE {formatDisplayMoney(
-          status.freeCollateralUsd,
-          status.displayCurrency,
-          status.fxRate,
-          0,
-        )}</span
-      >
-      {#if status.fundingPercent !== null}
-        <span>FUND {status.fundingPercent >= 0 ? "+" : ""}{formatNumber(status.fundingPercent, 3)}%/8h</span>
-      {/if}
-    </button>
+        <span
+          >FREE {formatDisplayMoney(
+            status.freeCollateralUsd,
+            status.displayCurrency,
+            status.fxRate,
+            0,
+          )}</span
+        >
+        {#if status.fundingPercent !== null}
+          <span>FUND {status.fundingPercent >= 0 ? "+" : ""}{formatNumber(status.fundingPercent, 3)}%/8h</span>
+        {/if}
+      </button>
+    </div>
     <span class="sl-sep" aria-hidden="true"></span>
   {/if}
   {#if status.walletAddress}
-    <span class="mono">{shortAddress(status.walletAddress)}</span>
+    <span class="mono sl-wallet">{shortAddress(status.walletAddress)}</span>
     <span class="sl-sep" aria-hidden="true"></span>
   {/if}
-  <button type="button" class="sl-help" onclick={onshowshortcuts}>? shortcuts</button>
+  <button
+    type="button"
+    class="sl-help"
+    aria-label="Keyboard shortcuts"
+    onclick={onshowshortcuts}
+  >? shortcuts</button>
 </footer>
 
 <style>
@@ -170,11 +182,14 @@
   .status-line {
     position: fixed;
     inset: auto 0 0 0;
+    /* Stop under the agent dock when open so the line doesn't cover the
+       composer (shell sets --agent-dock-w only while chat-open). */
+    right: var(--agent-dock-w, 0px);
     z-index: 30;
     display: flex;
     align-items: center;
     gap: 0.9rem;
-    height: 1.9rem;
+    height: var(--status-h, 1.9rem);
     padding: 0 1rem;
     border-top: 1px solid var(--line);
     background: rgba(8, 10, 13, 0.92);
@@ -182,7 +197,13 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.66rem;
     color: var(--muted);
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    scrollbar-width: none;
   }
+
+  .status-line::-webkit-scrollbar { display: none; }
 
   .sl-sep { width: 1px; height: 0.9rem; background: var(--line-soft); }
   .sl-grow { flex: 1; }
@@ -216,6 +237,11 @@
 
   /* Account money in the fixed line: equity/uPnL/free/funding, one click
      from the perp desk. */
+  .sl-money-scroll {
+    display: flex;
+    min-width: 0;
+  }
+
   .sl-money {
     display: inline-flex;
     align-items: center;
@@ -242,6 +268,86 @@
 
   .paper-badge.on {
     opacity: 1;
+  }
+
+  /* The agent becomes a full-width sheet at this breakpoint, so the footer
+     belongs to the full viewport instead of retaining the desktop dock gutter. */
+  @media (max-width: 1100px) {
+    .status-line {
+      right: 0;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .status-line {
+      gap: 0.45rem;
+      padding: 0 0.5rem;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    /* Keep live health and transaction warnings visible; move secondary
+       desktop telemetry out of the scarce phone footer. */
+    .sl-clock,
+    .sl-session,
+    .sl-rpc,
+    .sl-sync,
+    .sl-wallet,
+    .sl-sep,
+    .sl-grow {
+      display: none;
+    }
+
+    .sl-stream,
+    .sl-transient,
+    .sl-help {
+      flex: 0 0 auto;
+    }
+
+    .sl-transient {
+      max-width: 34vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Account data gets the remaining width and its own discoverable swipe
+       lane. This preserves every metric without widening the document. */
+    .sl-money-scroll {
+      flex: 1 1 auto;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      scrollbar-width: none;
+    }
+
+    .sl-money-scroll::-webkit-scrollbar {
+      display: none;
+    }
+
+    .sl-money {
+      min-width: max-content;
+      gap: 0.6rem;
+    }
+
+    .paper-badge {
+      min-width: auto;
+    }
+
+    .paper-badge:not(.on) {
+      display: none;
+    }
+
+    .sl-help {
+      width: 1.6rem;
+      height: 1.4rem;
+      margin-left: auto;
+      padding: 0;
+      font-size: 0;
+    }
+
+    .sl-help::before {
+      content: "?";
+      font-size: 0.66rem;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {

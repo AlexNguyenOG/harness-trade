@@ -36,7 +36,7 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from "@solana/web3.js";
-import { Buffer as BrowserBuffer } from "buffer/";
+import { Buffer as BrowserBuffer } from "buffer";
 import { USDC_MINT } from "./funding";
 import { tpSlExecutionPrice } from "./terminal/trade-math";
 import { isRecord } from "./utils";

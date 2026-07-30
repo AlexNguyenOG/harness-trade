@@ -173,9 +173,13 @@
       type="button"
       aria-expanded={$chatState.open}
       onclick={onToggleChat}
+      title="Open agent dock (`)"
     >
       Desk
     </button>
+    <a class="secondary desk-btn agent-link" href="/terminal/agent" title="Full-page agent chat">
+      Agent
+    </a>
     <div class="account-bay">
     {#if $privyAuth.authenticated && !paperMode}
       <div class="account-slot" in:fade|local={{ duration: 160 }} out:fade|local={{ duration: 120 }}>
@@ -529,6 +533,11 @@
       color 160ms ease,
       border-color 160ms ease,
       background 160ms ease;
+  }
+
+  a.agent-link {
+    text-decoration: none;
+    color: inherit;
   }
 
   .alerts-count {

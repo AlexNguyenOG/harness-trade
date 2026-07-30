@@ -5,7 +5,12 @@ import type {
 } from "$lib/phoenix-market-data";
 import type { PhoenixOpenOrder, PhoenixPosition } from "$lib/phoenix-trade";
 import type { SpotAsset } from "$lib/spot";
-import { buildPaletteRows, PALETTE_TABS, type PaletteTab } from "./palette";
+import {
+  buildPaletteRows,
+  isPaletteShortcut,
+  PALETTE_TABS,
+  type PaletteTab,
+} from "./palette";
 
 function market(symbol: string, maxLeverage = 20): PhoenixMarketConfig {
   return {
@@ -327,5 +332,83 @@ describe("repeat-last action row", () => {
       null,
     );
     expect(rows.some((row) => row.key === "action:repeat-last")).toBe(false);
+  });
+});
+
+describe("agent quick command", () => {
+  test("leads the palette and opens the agent dock", () => {
+    let opened = false;
+    const rows = buildPaletteRows(
+      [],
+      [],
+      {},
+      {},
+      "",
+      "all",
+      [],
+      [],
+      () => {},
+      () => {},
+      () => {},
+      null,
+      () => {
+        opened = true;
+      },
+    );
+
+    expect(rows[0]?.key).toBe("action:open-agent");
+    expect(rows[0]?.name).toBe("Open agent dock");
+    rows[0]?.action?.();
+    expect(opened).toBe(true);
+  });
+
+  test("remains available while a market category is selected", () => {
+    const rows = buildPaletteRows(
+      [],
+      [asset()],
+      {},
+      {},
+      "",
+      "crypto",
+      [],
+      [],
+      () => {},
+      () => {},
+      () => {},
+      null,
+      () => {},
+    );
+
+    expect(rows[0]?.key).toBe("action:open-agent");
+    expect(rows[1]?.kind).toBe("spot");
+  });
+});
+
+describe("palette shortcuts", () => {
+  test("opens from slash or Command-K only", () => {
+    expect(
+      isPaletteShortcut({
+        key: "/",
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+      }),
+    ).toBe(true);
+    expect(
+      isPaletteShortcut({
+        key: "k",
+        metaKey: true,
+        ctrlKey: false,
+        altKey: false,
+      }),
+    ).toBe(true);
+    expect(
+      isPaletteShortcut({
+        key: "k",
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+      }),
+    ).toBe(false);
   });
 });
