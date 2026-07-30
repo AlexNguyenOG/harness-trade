@@ -76,6 +76,15 @@
     walletFundsLabel,
   } from "$lib/terminal/account-format";
   import {
+    AGENT_DOCK_DEFAULT_WIDTH,
+    AGENT_DOCK_MAX_WIDTH,
+    AGENT_DOCK_MIN_WIDTH,
+    AGENT_DOCK_STORAGE_KEY,
+    agentDockWidthBounds,
+    clampAgentDockWidth,
+    parseAgentDockWidth,
+  } from "$lib/terminal/agent-dock";
+  import {
     BOOK_LADDER_LEVELS,
     BOOK_LADDER_LEVELS_STACKED,
     formatBookPrice,
@@ -699,6 +708,41 @@
   // (tabbed book/ticket, single-column chart stack) in the remaining width.
   $: chatOpen = $chatState.open;
   $: layoutStackedBook = stackedBook && !chatOpen;
+  let agentDockPreferredWidth = AGENT_DOCK_DEFAULT_WIDTH;
+  let agentDockWidth = AGENT_DOCK_DEFAULT_WIDTH;
+  let agentDockMinWidth = AGENT_DOCK_MIN_WIDTH;
+  let agentDockMaxWidth = AGENT_DOCK_MAX_WIDTH;
+
+  function syncAgentDockWidth(): void {
+    if (!browser) return;
+    const bounds = agentDockWidthBounds(window.innerWidth);
+    agentDockMinWidth = bounds.min;
+    agentDockMaxWidth = bounds.max;
+    agentDockWidth = clampAgentDockWidth(
+      agentDockPreferredWidth,
+      window.innerWidth,
+    );
+  }
+
+  function setAgentDockWidth(width: number): void {
+    agentDockPreferredWidth = Math.min(
+      AGENT_DOCK_MAX_WIDTH,
+      Math.max(AGENT_DOCK_MIN_WIDTH, width),
+    );
+    syncAgentDockWidth();
+  }
+
+  function persistAgentDockWidth(width: number): void {
+    setAgentDockWidth(width);
+    try {
+      localStorage.setItem(
+        AGENT_DOCK_STORAGE_KEY,
+        String(Math.round(agentDockPreferredWidth)),
+      );
+    } catch {
+      // Local persistence is best-effort in private or quota-limited browsers.
+    }
+  }
   // Chart footer density: measured against the chart panel width so shrinking
   // the window (or the book eating space) swaps the long date range out
   // before it crushes the controls.
@@ -1883,6 +1927,18 @@
   }
 
   onMount(() => {
+    try {
+      const savedDockWidth = parseAgentDockWidth(
+        localStorage.getItem(AGENT_DOCK_STORAGE_KEY),
+      );
+      if (savedDockWidth !== null) agentDockPreferredWidth = savedDockWidth;
+    } catch {
+      // Keep the default width when local storage is unavailable.
+    }
+    syncAgentDockWidth();
+    const onAgentDockViewportResize = () => syncAgentDockWidth();
+    window.addEventListener("resize", onAgentDockViewportResize);
+
     loadOpenBetaBanner();
     loadPrefs();
     applyDeepLink(); // ?asset=&venue=&side=… — overrides restored prefs
@@ -2008,6 +2064,7 @@
       window.cancelAnimationFrame(bookFrame);
       document.removeEventListener("visibilitychange", onVisible);
       stopPaperPnlLog();
+      window.removeEventListener("resize", onAgentDockViewportResize);
       stackMq.removeEventListener("change", onStackMq);
       footerRo?.disconnect();
       window.clearInterval(footerWatchTimer);
@@ -6195,7 +6252,7 @@
 <main
   class="terminal-shell"
   class:chat-open={chatOpen}
-  style={`--topbar-h: ${topbarHeight || 48}px; --status-h: 1.9rem;${chatOpen ? " --agent-dock-w: min(42vw, 28rem);" : ""}`}
+  style={`--topbar-h: ${topbarHeight || 48}px; --status-h: 1.9rem;${chatOpen ? ` --agent-dock-w: ${agentDockWidth}px;` : ""}`}
 >
   <a class="skip-link" href="#terminal-content">Skip to terminal content</a>
 
@@ -6916,6 +6973,11 @@
           buildContext={buildDeskContextClosure}
           onRequestAuth={openAuthModal}
           accountMode={paperMode ? "paper" : "live"}
+          dockWidth={agentDockWidth}
+          minDockWidth={agentDockMinWidth}
+          maxDockWidth={agentDockMaxWidth}
+          onDockResize={setAgentDockWidth}
+          onDockResizeEnd={persistAgentDockWidth}
         />
       {/await}
     {/if}
@@ -7191,12 +7253,8 @@
     color: var(--ink);
   }
 
-  /* Agent dock open: leave a right gutter for the full-height panel and
-     compress the terminal like the ≤1100px responsive layout. */
-  .terminal-shell.chat-open {
-    --agent-dock-w: min(42vw, 28rem);
-  }
-
+  /* Agent dock open: the shell's clamped --agent-dock-w leaves a right
+     gutter for the full-height panel and compresses the terminal. */
   .terminal-shell.chat-open .dashboard,
   .terminal-shell.chat-open .terminal-notice {
     margin-right: var(--agent-dock-w);
@@ -7593,6 +7651,7 @@
   .chart-canvas-shell {
     position: relative;
     min-height: 0;
+    container-type: inline-size;
     background: var(--chart-bg);
     overflow: hidden;
   }
@@ -7605,11 +7664,17 @@
     place-items: center;
     pointer-events: none;
     color: var(--accent);
-    font-size: clamp(3.5rem, 12vw, 7rem);
+    font-size: clamp(2.75rem, 16cqw, 7rem);
     font-weight: 900;
     letter-spacing: 0.18em;
     opacity: 0.07;
     user-select: none;
+  }
+
+  @container (max-width: 420px) {
+    .paper-watermark {
+      letter-spacing: 0.1em;
+    }
   }
 
   .chart-overlay {

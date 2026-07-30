@@ -185,7 +185,13 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.66rem;
     color: var(--muted);
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    scrollbar-width: none;
   }
+
+  .status-line::-webkit-scrollbar { display: none; }
 
   .sl-sep { width: 1px; height: 0.9rem; background: var(--line-soft); }
   .sl-grow { flex: 1; }
@@ -250,6 +256,12 @@
   @media (prefers-reduced-motion: reduce) {
     .paper-badge {
       transition: none !important;
+    }
+  }
+
+  @media (max-width: 1100px) {
+    .status-line {
+      right: 0;
     }
   }
 </style>

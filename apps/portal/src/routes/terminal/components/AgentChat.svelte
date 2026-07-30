@@ -430,6 +430,27 @@
     min-height: 3.1rem;
   }
 
+  .layout-dock .agent-head {
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    padding: 0.55rem 0.7rem;
+  }
+
+  .layout-dock .agent-head-left,
+  .layout-dock .agent-head-right {
+    width: 100%;
+  }
+
+  .layout-dock .agent-head-left {
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .layout-dock .agent-head-right {
+    justify-content: flex-end;
+  }
+
   .agent-head-left,
   .agent-head-right {
     display: flex;
@@ -480,6 +501,15 @@
     flex: 0 0 auto;
     border: 1px solid var(--line-soft);
     background: var(--surface-2);
+  }
+
+  .layout-dock .picker {
+    flex: 1 1 14rem;
+  }
+
+  .layout-dock .picker button {
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .picker button {
@@ -817,6 +847,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 0.5rem;
   }
 
