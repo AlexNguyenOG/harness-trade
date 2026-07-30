@@ -33,6 +33,16 @@ export const PALETTE_TABS: { key: PaletteTab; label: string }[] = [
   { key: "pre-ipo", label: "Pre-IPO" },
 ];
 
+export function isPaletteShortcut(
+  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey">,
+): boolean {
+  if (event.ctrlKey || event.altKey) return false;
+  return (
+    (!event.metaKey && event.key === "/") ||
+    (event.metaKey && event.key.toLowerCase() === "k")
+  );
+}
+
 export function buildPaletteRows(
   perpMarkets: PhoenixMarketConfig[],
   assets: SpotAsset[],
@@ -46,6 +56,7 @@ export function buildPaletteRows(
   cancelSymbolOrders: (symbol: string) => void,
   flattenAll: () => void,
   repeatLast: { label: string; apply: () => void } | null = null,
+  openAgent: (() => void) | null = null,
 ): PaletteRow[] {
   // Live-state actions: one Close per position, one Cancel per symbol with
   // book orders, Flatten once there is more than one position to close.
@@ -57,6 +68,17 @@ export function buildPaletteRows(
     volumeUsd: null,
     hub: "perps" as const,
   };
+  const commands: PaletteRow[] = [];
+  if (openAgent) {
+    commands.push({
+      kind: "action",
+      key: "action:open-agent",
+      symbol: "AGENT",
+      name: "Open agent dock",
+      ...blank,
+      action: openAgent,
+    });
+  }
   const actions: PaletteRow[] = [];
   if (repeatLast) {
     actions.push({
@@ -139,10 +161,10 @@ export function buildPaletteRows(
   // follows by volume.
   let rows =
     tab === "perps"
-      ? [...actions, ...perps]
+      ? [...commands, ...actions, ...perps]
       : tab === "all"
-        ? [...actions, ...perps, ...spots]
-        : spots.filter((row) => row.hub === tab);
+        ? [...commands, ...actions, ...perps, ...spots]
+        : [...commands, ...spots.filter((row) => row.hub === tab)];
   const q = query.trim().toLowerCase();
   if (q) {
     rows = rows.filter(

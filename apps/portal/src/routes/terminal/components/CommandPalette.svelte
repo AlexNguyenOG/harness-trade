@@ -26,6 +26,7 @@
     oncancelorders,
     onflatten,
     repeatLast,
+    onopenagent,
     onselect,
     ontogglewatch,
     onclose,
@@ -41,6 +42,7 @@
     oncancelorders: (symbol: string) => void;
     onflatten: () => void;
     repeatLast: { label: string; apply: () => void } | null;
+    onopenagent: () => void;
     onselect: (row: PaletteRow) => void;
     ontogglewatch: (symbol: string) => void;
     onclose: () => void;
@@ -70,6 +72,7 @@
       oncancelorders,
       onflatten,
       repeatLast,
+      onopenagent,
     ),
   );
   $effect(() => {
@@ -111,7 +114,7 @@
     class="modal palette"
     role="dialog"
     aria-modal="true"
-    aria-label="Select market"
+    aria-label="Market and command palette"
     tabindex="-1"
     onclick={(event) => event.stopPropagation()}
     onkeydown={onKeydown}
@@ -121,8 +124,8 @@
       <input
         bind:this={input}
         bind:value={query}
-        placeholder="Search markets"
-        aria-label="Search markets"
+        placeholder="Search markets or commands"
+        aria-label="Search markets or commands"
         oninput={() => (index = 0)}
       />
     </div>
@@ -196,7 +199,7 @@
       {/each}
     </div>
     <div class="palette-foot" aria-hidden="true">
-      <span><kbd>/</kbd> Open</span>
+      <span><kbd>/ · ⌘K</kbd> Open</span>
       <span><kbd>↑↓</kbd> Navigate</span>
       <span><kbd>Enter</kbd> Select</span>
       <span><kbd>Esc</kbd> Close</span>

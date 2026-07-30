@@ -275,7 +275,10 @@
     toCandle,
     toVolume,
   } from "$lib/terminal/chart-format";
-  import type { PaletteRow } from "$lib/terminal/palette";
+  import {
+    isPaletteShortcut,
+    type PaletteRow,
+  } from "$lib/terminal/palette";
   import {
     CandlestickSeries,
     ColorType,
@@ -6009,6 +6012,10 @@
     paletteOpen = true;
   }
 
+  function openAgentDock(): void {
+    if (!$chatState.open) toggleChat();
+  }
+
   function choosePalette(row: PaletteRow): void {
     if (row.kind === "action") {
       row.action?.();
@@ -6103,7 +6110,13 @@
       if (cheatOpen) cheatOpen = false;
       if ($chatState.open && !modalOwned) closeChat();
     }
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const paletteShortcut = isPaletteShortcut(event);
+    if (
+      (event.metaKey || event.ctrlKey || event.altKey) &&
+      !paletteShortcut
+    ) {
+      return;
+    }
     const target = event.target;
     if (
       target instanceof HTMLElement &&
@@ -6160,7 +6173,7 @@
       toggleChat();
       return;
     }
-    if (event.key === "/") {
+    if (paletteShortcut) {
       event.preventDefault();
       openPalette();
       return;
@@ -7088,6 +7101,7 @@
           apply: applyLastOrderIntent,
         }
       : null}
+    onopenagent={openAgentDock}
     onselect={choosePalette}
     ontogglewatch={toggleWatch}
     onclose={() => (paletteOpen = false)}
