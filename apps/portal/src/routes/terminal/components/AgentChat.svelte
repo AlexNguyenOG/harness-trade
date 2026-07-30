@@ -438,10 +438,9 @@
     position: fixed;
     right: 0;
     top: var(--topbar-h, 3rem);
+    bottom: var(--status-h, 1.9rem);
     width: var(--agent-dock-w, min(42vw, 28rem));
-    height: calc(
-      100dvh - var(--topbar-h, 3rem) - var(--status-h, 1.9rem)
-    );
+    height: auto;
     border-left: 1px solid var(--line);
     z-index: 25;
   }
@@ -1071,10 +1070,9 @@
       right: 0;
       left: 0;
       top: var(--topbar-h, 3rem);
+      bottom: var(--status-h, 1.9rem);
       width: auto;
-      height: calc(
-        100dvh - var(--topbar-h, 3rem) - var(--status-h, 1.9rem)
-      );
+      height: auto;
       z-index: 30;
       border-left: none;
     }
