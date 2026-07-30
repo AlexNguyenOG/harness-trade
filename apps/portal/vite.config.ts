@@ -20,9 +20,7 @@ export default defineConfig(({ mode }) => {
     // /eve/v1/session/:id (+ stream) paths (platform NOT_FOUND). Stable
     // `services` live in vercel.json and must not be overwritten on build.
     plugins: [
-      ...(skipEve
-        ? []
-        : [eveSvelteKit({ configureVercelJson: false })]),
+      ...(skipEve ? [] : [eveSvelteKit({ configureVercelJson: false })]),
       sveltekit(),
     ],
     ssr: { noExternal: ["@harness-trade/ui"] },
