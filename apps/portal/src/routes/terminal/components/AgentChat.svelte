@@ -9,6 +9,11 @@
   import { AGENT_MODE_LABEL, type AgentMode } from "$lib/agent/modes";
   import { agentState, getAgentPolicy, setAgentMode, setAgentPaused } from "$lib/agent/state";
   import {
+    clearAgentThread,
+    loadAgentThread,
+    saveAgentThread,
+  } from "$lib/agent/thread-cache";
+  import {
     projectHarnessTool,
     type WorkstreamCard,
   } from "$lib/agent/workstream";
@@ -37,22 +42,11 @@
   let scrollEl: HTMLDivElement | null = $state(null);
   let inputEl: HTMLTextAreaElement | null = $state(null);
   const agentModes: AgentMode[] = ["observe", "ask", "auto"];
-  const SESSION_KEY = "harness.eve.session.v1";
-  const EVENTS_KEY = "harness.eve.events.v1";
-
-  function readSaved(key: string): unknown {
-    if (!browser) return undefined;
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : undefined;
-    } catch {
-      return undefined;
-    }
-  }
+  const restoredThread = browser ? loadAgentThread(localStorage) : null;
 
   const eve = useEveAgent({
-    initialSession: readSaved(SESSION_KEY) as never,
-    initialEvents: readSaved(EVENTS_KEY) as never,
+    initialSession: restoredThread?.session as never,
+    initialEvents: restoredThread?.events as never,
     headers: async () => {
       const token = await getPrivyAccessToken();
       const policy = getAgentPolicy();
@@ -93,13 +87,20 @@
 
   $effect(() => {
     if (!browser) return;
+    persistCurrentThread();
+  });
+
+  function persistCurrentThread(): void {
+    if (!browser) return;
     try {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(eve.session));
-      localStorage.setItem(EVENTS_KEY, JSON.stringify(eve.events));
+      saveAgentThread(localStorage, {
+        session: eve.session,
+        events: eve.events,
+      });
     } catch {
       // A private browser or exhausted quota should not break the session.
     }
-  });
+  }
 
   function submit(event: SubmitEvent): void {
     event.preventDefault();
@@ -156,12 +157,17 @@
   function resetSession(): void {
     eve.reset();
     if (browser) {
-      localStorage.removeItem(SESSION_KEY);
-      localStorage.removeItem(EVENTS_KEY);
+      clearAgentThread(localStorage);
     }
   }
 
+  function handleExpand(): void {
+    persistCurrentThread();
+    onExpand?.();
+  }
+
   function handleClose(): void {
+    persistCurrentThread();
     if (onClose) onClose();
     else closeChat();
   }
@@ -221,7 +227,7 @@
         New
       </button>
       {#if layout === "dock" && onExpand}
-        <button class="ghost" type="button" onclick={onExpand} title="Full page">
+        <button class="ghost" type="button" onclick={handleExpand} title="Full page">
           Expand
         </button>
       {/if}
