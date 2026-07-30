@@ -5,6 +5,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import AgentChat from "../components/AgentChat.svelte";
+  import AuthModal from "../components/AuthModal.svelte";
   import { buildPaperDeskContext } from "$lib/agent/paper-host";
   import { chatState } from "$lib/chat";
   import { initializePrivyAuth, privyAuth } from "$lib/privy-auth";
@@ -12,6 +13,7 @@
   const accountMode = $derived(
     page.url.searchParams.get("account") === "live" ? "live" : "paper",
   );
+  let authOpen = $state(false);
 
   // Keep dock closed while on full page — one surface.
   $effect(() => {
@@ -25,10 +27,16 @@
   });
 
   function requestAuth(): void {
-    // Full-page chat reuses terminal auth modal.
-    void goto("/terminal?auth=1");
+    if ($privyAuth.authenticated) return;
+    authOpen = true;
+  }
+
+  function onGlobalKeydown(event: KeyboardEvent): void {
+    if (event.key === "Escape" && authOpen) authOpen = false;
   }
 </script>
+
+<svelte:window onkeydown={onGlobalKeydown} />
 
 <div class="agent-page">
   <nav class="agent-nav">
@@ -39,7 +47,7 @@
     <button class="ghost" type="button" onclick={() => void goto("/terminal")}>
       Terminal
     </button>
-    {#if !$privyAuth.authenticated}
+    {#if !$privyAuth.authenticated && $privyAuth.status !== "loading"}
       <button class="secondary" type="button" onclick={requestAuth}>
         Sign in
       </button>
@@ -55,6 +63,10 @@
     />
   </main>
 </div>
+
+{#if authOpen}
+  <AuthModal onclose={() => (authOpen = false)} />
+{/if}
 
 <style>
   .agent-page {

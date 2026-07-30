@@ -386,7 +386,11 @@
         </div>
       {/if}
 
-      {#if !$privyAuth.authenticated}
+      {#if $privyAuth.status === "loading"}
+        <div class="state">
+          <p>Restoring your session…</p>
+        </div>
+      {:else if !$privyAuth.authenticated}
         <div class="state">
           <p>Sign in to talk to the agent.</p>
           <button class="primary" type="button" onclick={onRequestAuth}>
