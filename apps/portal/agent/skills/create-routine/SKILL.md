@@ -1,5 +1,10 @@
 ---
-description: Create or change a recurring market review, alert, or bounded position-management Routine and its optional Mandate.
+name: create-routine
+description: >-
+  Create or change a recurring market review, alert, or bounded
+  position-management Routine and its optional Mandate. Use when the user asks
+  the agent to remember work on a cadence, monitor a condition, send an alert,
+  or manage a position until a condition is met.
 ---
 
 # Create a Routine

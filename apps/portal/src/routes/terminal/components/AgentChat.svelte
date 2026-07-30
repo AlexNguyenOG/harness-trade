@@ -27,6 +27,7 @@
   import MarkdownMessage from "./MarkdownMessage.svelte";
   import PriceQuoteCard from "./PriceQuoteCard.svelte";
   import ToolActivity from "./ToolActivity.svelte";
+  import AgentSkillsPanel from "./AgentSkillsPanel.svelte";
 
   let {
     buildContext,
@@ -266,6 +267,7 @@
       </div>
     </div>
     <div class="agent-head-right">
+      <AgentSkillsPanel {onRequestAuth} />
       <button
         class="ghost"
         class:pause-on={$agentState.paused}

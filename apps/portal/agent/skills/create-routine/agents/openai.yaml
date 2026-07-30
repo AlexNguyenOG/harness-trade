@@ -1,0 +1,4 @@
+interface:
+  display_name: Create a Routine
+  short_description: Recurring reviews, alerts, and mandated position management.
+  default_prompt: alert me if SOL drops 5% from here
