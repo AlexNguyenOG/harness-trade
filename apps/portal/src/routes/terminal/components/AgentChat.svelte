@@ -30,7 +30,9 @@
     privyAuth,
   } from "$lib/privy-auth";
   import { projectPriceQuote } from "$lib/agent/price-presentation";
+  import MarkdownMessage from "./MarkdownMessage.svelte";
   import PriceQuoteCard from "./PriceQuoteCard.svelte";
+  import ToolActivity from "./ToolActivity.svelte";
 
   let {
     buildContext,
@@ -83,7 +85,15 @@
     Parameters<typeof eve.send>[0]["clientContext"]
   > {
     // buildDeskContext is the JSON-safe serializer at this client boundary.
-    return buildContext() as NonNullable<
+    const policy = getAgentPolicy();
+    return {
+      ...buildContext(),
+      agentPolicy: {
+        mode: policy.mode,
+        paused: policy.paused,
+        accountMode,
+      },
+    } as NonNullable<
       Parameters<typeof eve.send>[0]["clientContext"]
     >;
   }
@@ -96,6 +106,13 @@
         .map((part) => part.toolMetadata?.eve?.inputRequest)
         .filter((request) => request !== undefined),
     ),
+  );
+  const hasActiveTool = $derived(
+    eve.data.messages
+      .flatMap((message) => message.parts.filter(isDynamicToolPart))
+      .some((part) =>
+        ["pending", "running", "waiting"].includes(projectPart(part).status),
+      ),
   );
 
   $effect(() => {
@@ -157,23 +174,23 @@
     }
   }
 
-  function submit(event: SubmitEvent): void {
-    event.preventDefault();
-    const text = draft.trim();
+  function sendMessage(value: string): void {
+    const text = value.trim();
     if (!text || busy) return;
     draft = "";
     void eve.send({ message: text, clientContext: buildEveContext() });
     inputEl?.focus();
   }
 
+  function submit(event: SubmitEvent): void {
+    event.preventDefault();
+    sendMessage(inputEl?.value ?? draft);
+  }
+
   function onKeydown(event: KeyboardEvent): void {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      const text = draft.trim();
-      if (busy || !text) return;
-      draft = "";
-      void eve.send({ message: text, clientContext: buildEveContext() });
-    }
+    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    event.preventDefault();
+    (event.currentTarget as HTMLTextAreaElement).form?.requestSubmit();
   }
 
   function isDynamicToolPart(part: EveMessagePart): part is EveDynamicToolPart {
@@ -207,6 +224,39 @@
       errorText: part.errorText,
       approvalPending: Boolean(part.toolMetadata?.eve?.inputRequest),
     });
+  }
+
+  function messageToolParts(
+    parts: readonly EveMessagePart[],
+  ): EveDynamicToolPart[] {
+    return parts.filter(isDynamicToolPart);
+  }
+
+  function isFirstToolPart(
+    parts: readonly EveMessagePart[],
+    part: EveDynamicToolPart,
+  ): boolean {
+    return messageToolParts(parts)[0]?.toolCallId === part.toolCallId;
+  }
+
+  function toolActivityItems(parts: readonly EveMessagePart[]) {
+    return messageToolParts(parts).map((part) => ({
+      id: part.toolCallId,
+      toolName: part.toolName,
+      card: projectPart(part),
+      approvalPending: Boolean(part.toolMetadata?.eve?.inputRequest),
+    }));
+  }
+
+  function answerTool(
+    parts: readonly EveMessagePart[],
+    toolCallId: string,
+    approved: boolean,
+  ): void {
+    const part = messageToolParts(parts).find(
+      (candidate) => candidate.toolCallId === toolCallId,
+    );
+    if (part) answerPart(part, approved);
   }
 
   function paperActionFromPart(
@@ -356,8 +406,23 @@
         <div class="msg {message.role}">
           {#each message.parts as part}
             {#if part.type === "text" && partText(part)}
-              <span>{partText(part)}</span>
+              {#if message.role === "assistant"}
+                <MarkdownMessage source={partText(part)} />
+              {:else}
+                <span>{partText(part)}</span>
+              {/if}
             {:else if isDynamicToolPart(part)}
+              {#if isFirstToolPart(message.parts, part)}
+                <ToolActivity
+                  items={toolActivityItems(message.parts)}
+                  onAnswer={(toolCallId, approved) =>
+                    answerTool(
+                      message.parts,
+                      toolCallId,
+                      approved,
+                    )}
+                />
+              {/if}
               {@const quote = projectPriceQuote({
                 toolName: part.toolName,
                 state: part.state,
@@ -365,127 +430,16 @@
               })}
               {#if quote}
                 <PriceQuoteCard {quote} {layout} />
-              {:else}
-                {@const card = projectPart(part)}
-                <div
-                  class="work-card"
-                  class:context-card={card.kind === "context"}
-                  class:waiting-card={card.status === "waiting"}
-                  class:success-card={card.tone === "success"}
-                  class:danger-card={card.tone === "danger"}
-                  class:info-card={card.tone === "info"}
-                >
-                  <div class="work-card-head">
-                    <span>{card.eyebrow}</span>
-                    <span>{card.statusLabel}</span>
-                  </div>
-                  <p class="work-title">{card.title}</p>
-                  {#if card.summary}
-                    <p class="work-summary">{card.summary}</p>
-                  {/if}
-
-                  {#if card.facts.length > 0}
-                    <dl class="work-facts">
-                      {#each card.facts as fact}
-                        <div>
-                          <dt>{fact.label}</dt>
-                          <dd>{fact.value}</dd>
-                        </div>
-                      {/each}
-                    </dl>
-                  {/if}
-
-                  {#if card.steps.length > 0}
-                    <ol class="work-steps">
-                      {#each card.steps as step}
-                        <li>
-                          <span
-                            class="step-mark"
-                            class:step-done={step.status === "success"}
-                            class:step-active={step.status === "running" || step.status === "waiting"}
-                            class:step-failed={step.status === "failed" || step.status === "denied"}
-                          ></span>
-                          <span>{step.label}</span>
-                        </li>
-                      {/each}
-                    </ol>
-                  {/if}
-
-                  {#if card.receipts.length > 0}
-                    <div class="work-receipts">
-                      {#each card.receipts as receipt}
-                        <div class="receipt-row">
-                          <div>
-                            {#if receipt.href}
-                              <a
-                                href={receipt.href}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                {receipt.label} ↗
-                              </a>
-                            {:else}
-                              <span>{receipt.label}</span>
-                            {/if}
-                            {#if receipt.reference}
-                              <code>{receipt.reference}</code>
-                            {/if}
-                          </div>
-                          <span>{receipt.status}</span>
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-
-                  {#each card.links as link}
-                    <a
-                      class="work-link"
-                      href={link.href}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {link.label} ↗
-                    </a>
-                  {/each}
-
-                  {#if card.details.length > 0}
-                    <details class="work-details">
-                      <summary>Details</summary>
-                      {#each card.details as detail}
-                        <p>{detail}</p>
-                      {/each}
-                    </details>
-                  {/if}
-
-                  {#if part.toolMetadata?.eve?.inputRequest}
-                    <div class="work-actions">
-                      <button
-                        class="primary"
-                        type="button"
-                        onclick={() => answerPart(part, true)}
-                      >
-                        {card.kind === "context" ? "Apply" : "Approve"}
-                      </button>
-                      <button
-                        class="ghost"
-                        type="button"
-                        onclick={() => answerPart(part, false)}
-                      >
-                        {card.kind === "context" ? "Dismiss" : "Deny"}
-                      </button>
-                    </div>
-                  {/if}
-                </div>
               {/if}
             {/if}
           {/each}
         </div>
       {/each}
 
-      {#if busy}
-        <div class="skeleton" aria-hidden="true">
-          <i></i>
-          <i></i>
+      {#if busy && !hasActiveTool}
+        <div class="thinking" aria-live="polite">
+          <i aria-hidden="true"></i>
+          <span>Thinking</span>
         </div>
       {/if}
 
@@ -807,209 +761,10 @@
   }
 
   .msg.assistant {
+    display: grid;
+    gap: 0.48rem;
     border-left: 2px solid var(--accent);
     padding-left: 0.65rem;
-  }
-
-  .work-card {
-    position: relative;
-    border: 1px solid var(--line-soft);
-    border-left: 2px solid var(--line);
-    background: var(--surface-2);
-    padding: 0.52rem 0.62rem;
-    display: grid;
-    gap: 0.34rem;
-    white-space: normal;
-  }
-
-  .work-card.waiting-card {
-    border-color: var(--amber);
-  }
-
-  .work-card.success-card {
-    border-left-color: var(--up);
-  }
-
-  .work-card.danger-card {
-    border-left-color: var(--red);
-  }
-
-  .work-card.info-card {
-    border-left-color: var(--accent);
-  }
-
-  .work-card.context-card {
-    border-left-color: var(--muted);
-    background: transparent;
-  }
-
-  .work-card-head {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.58rem;
-    font-weight: 800;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-
-  .work-title {
-    margin: 0;
-    color: var(--ink);
-    font-size: 0.8rem;
-    font-weight: 700;
-  }
-
-  .work-summary {
-    margin: 0;
-    font-size: 0.7rem;
-    line-height: 1.42;
-    color: var(--muted);
-  }
-
-  .work-facts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    margin: 0.05rem 0 0;
-  }
-
-  .work-facts div {
-    display: inline-flex;
-    gap: 0.25rem;
-    padding: 0.14rem 0.3rem;
-    border: 1px solid var(--line-soft);
-    font-size: 0.62rem;
-  }
-
-  .work-facts dt {
-    color: var(--faint);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .work-facts dd {
-    margin: 0;
-    color: var(--ink);
-  }
-
-  .work-steps {
-    display: grid;
-    gap: 0.24rem;
-    margin: 0.12rem 0 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .work-steps li {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.4rem;
-    color: var(--muted);
-    font-size: 0.68rem;
-    line-height: 1.35;
-  }
-
-  .step-mark {
-    flex: 0 0 auto;
-    width: 0.4rem;
-    height: 0.4rem;
-    margin-top: 0.24rem;
-    border: 1px solid var(--faint);
-    background: transparent;
-  }
-
-  .step-mark.step-done {
-    border-color: var(--up);
-    background: var(--up);
-  }
-
-  .step-mark.step-active {
-    border-color: var(--accent);
-    background: var(--accent);
-  }
-
-  .step-mark.step-failed {
-    border-color: var(--red);
-    background: var(--red);
-  }
-
-  .work-receipts {
-    display: grid;
-    margin-top: 0.08rem;
-    border-top: 1px solid var(--line-soft);
-  }
-
-  .receipt-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    min-width: 0;
-    padding: 0.32rem 0;
-    border-bottom: 1px solid var(--line-soft);
-    color: var(--muted);
-    font-size: 0.62rem;
-    text-transform: uppercase;
-    letter-spacing: 0.035em;
-  }
-
-  .receipt-row div {
-    display: flex;
-    align-items: center;
-    gap: 0.42rem;
-    min-width: 0;
-  }
-
-  .receipt-row a,
-  .work-link {
-    width: fit-content;
-    color: var(--accent);
-    font-weight: 700;
-    text-decoration: none;
-  }
-
-  .receipt-row a:hover,
-  .work-link:hover {
-    text-decoration: underline;
-  }
-
-  .receipt-row code {
-    overflow: hidden;
-    color: var(--faint);
-    font: inherit;
-    text-overflow: ellipsis;
-    text-transform: none;
-  }
-
-  .work-link {
-    font-size: 0.64rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .work-details {
-    color: var(--muted);
-    font-size: 0.66rem;
-  }
-
-  .work-details summary {
-    width: fit-content;
-    color: var(--faint);
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .work-details p {
-    margin: 0.3rem 0 0;
-    line-height: 1.4;
-  }
-
-  .work-actions {
-    display: flex;
-    gap: 0.35rem;
-    padding-top: 0.18rem;
   }
 
   .money-paused {
@@ -1022,37 +777,29 @@
     letter-spacing: 0.04em;
   }
 
-  .skeleton {
-    border-left: 2px solid var(--accent);
-    padding-left: 0.5rem;
-    display: grid;
-    gap: 0.45rem;
+  .thinking {
+    display: flex;
+    align-items: center;
+    gap: 0.38rem;
+    min-height: 1.65rem;
+    color: var(--faint);
+    font-size: 0.69rem;
   }
 
-  .skeleton i {
+  .thinking i {
     display: block;
-    height: 0.5rem;
-    background-color: var(--surface-2);
-    background-image: linear-gradient(
-      90deg,
-      transparent 25%,
-      var(--accent-soft) 50%,
-      transparent 75%
-    );
-    background-size: 280% 100%;
-    animation: shimmer 2.2s ease-in-out infinite;
+    box-sizing: border-box;
+    width: 0.65rem;
+    height: 0.65rem;
+    border: 1px solid var(--line-soft);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
   }
 
-  .skeleton i:last-child {
-    width: 62%;
-  }
-
-  @keyframes shimmer {
-    0% {
-      background-position: 150% 0;
-    }
-    100% {
-      background-position: -150% 0;
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
     }
   }
 
@@ -1186,6 +933,12 @@
       height: auto;
       z-index: 30;
       border-left: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .thinking i {
+      animation: none;
     }
   }
 </style>

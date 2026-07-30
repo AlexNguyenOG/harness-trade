@@ -84,7 +84,7 @@ export function buildPaperDeskContext(): Record<string, unknown> {
     positions: trader.positions,
     openOrders: trader.orders,
     dayPnlUsd: null,
-    equityUsd: null,
+    equityUsd: trader.totalCollateralUsd,
     monitorRows: [],
     watchlist: readWatchlist(),
     headlines: [],
