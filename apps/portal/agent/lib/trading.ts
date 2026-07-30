@@ -31,10 +31,15 @@ const TOKENS_API = "https://api.tokens.xyz/v1";
 
 export type TradeResult = {
   ok: true;
+  status: "confirmed";
   operation: string;
   summary: string;
   signatures: string[];
   explorerUrls: string[];
+  receipts: Array<{
+    signature: string;
+    status: "confirmed";
+  }>;
 };
 
 type SpotAsset = {
@@ -124,10 +129,10 @@ function validateWalletTransaction(
 }
 
 async function sendVersioned(
-  _ctx: ToolContext,
+  ctx: ToolContext,
   wallet: ServerWalletProfile,
   transaction: VersionedTransaction,
-  _suffix: string,
+  suffix: string,
 ): Promise<string> {
   validateWalletTransaction(transaction, wallet);
   const connection = createSolanaConnection(rpcUrl());
@@ -139,11 +144,31 @@ async function sendVersioned(
       `transaction-simulation-failed:${JSON.stringify(simulation.value.err)}`,
     );
   }
-  return signAndSendWithServerWallet({
+  const receipt = await signAndSendWithServerWallet({
     wallet,
     transaction,
     connection,
   });
+  if (receipt.status !== "confirmed") {
+    appendTransaction({
+      id: `${ctx.session.id}:${ctx.callId}:${suffix}`,
+      at: new Date().toISOString(),
+      operation: suffix,
+      summary:
+        receipt.status === "unknown"
+          ? "Transaction broadcast; confirmation outcome unknown. Reconcile this signature before retrying."
+          : `Transaction rejected${receipt.error ? `: ${receipt.error}` : "."}`,
+      status: receipt.status,
+      signatures: [receipt.signature],
+    });
+    if (receipt.status === "unknown") {
+      throw new Error(`transaction-outcome-unknown:${receipt.signature}`);
+    }
+    throw new Error(
+      `transaction-rejected:${receipt.signature}${receipt.error ? `:${receipt.error}` : ""}`,
+    );
+  }
+  return receipt.signature;
 }
 
 async function sendInstructions(
@@ -172,17 +197,23 @@ function result(
     at: new Date().toISOString(),
     operation,
     summary,
+    status: "confirmed" as const,
     signatures,
   };
   appendTransaction(entry);
   return {
     ok: true,
+    status: "confirmed",
     operation,
     summary,
     signatures,
     explorerUrls: signatures.map(
       (signature) => `https://solscan.io/tx/${signature}`,
     ),
+    receipts: signatures.map((signature) => ({
+      signature,
+      status: "confirmed" as const,
+    })),
   };
 }
 

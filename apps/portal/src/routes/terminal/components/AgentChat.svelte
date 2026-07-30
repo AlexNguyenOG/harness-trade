@@ -186,8 +186,6 @@
         {/if}
         {#if accountMode === "paper"}
           <span class="tag paper">PAPER</span>
-        {:else}
-          <span class="tag live-wallet">LIVE SERVER WALLET</span>
         {/if}
       </div>
       <div class="picker" role="radiogroup" aria-label="Approval mode">
@@ -546,11 +544,6 @@
 
   .tag.paper {
     color: var(--amber);
-  }
-
-  .tag.live-wallet {
-    color: var(--up);
-    border-color: var(--up);
   }
 
   .tag.durable {

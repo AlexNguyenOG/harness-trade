@@ -5,6 +5,7 @@ export type AgentLedgerEntry = {
   at: string;
   operation: string;
   summary: string;
+  status: "confirmed" | "rejected" | "unknown";
   signatures: string[];
 };
 
