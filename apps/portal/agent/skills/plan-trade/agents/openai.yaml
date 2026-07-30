@@ -1,0 +1,4 @@
+interface:
+  display_name: Plan a trade
+  short_description: Plan → execute → verify account-changing requests.
+  default_prompt: long SOL $50 @ 3x market
