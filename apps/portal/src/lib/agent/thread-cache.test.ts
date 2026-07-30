@@ -3,6 +3,7 @@ import {
   type AgentThreadStorage,
   clearAgentThread,
   loadAgentThread,
+  prepareAgentThreadForResume,
   saveAgentThread,
 } from "./thread-cache";
 
@@ -69,5 +70,81 @@ describe("agent thread cache", () => {
     clearAgentThread(storage);
 
     expect(loadAgentThread(storage)).toBeNull();
+  });
+
+  test("repairs a cursor that trails its persisted durable events", () => {
+    const started = { type: "session.started", data: { runtime: "agent" } };
+    const received = {
+      type: "message.received",
+      data: { turnId: "turn-1", message: "what about funding rates" },
+    };
+    const waiting = {
+      type: "session.waiting",
+      data: { continuationToken: "next-1" },
+    };
+
+    const prepared = prepareAgentThreadForResume({
+      session: {
+        sessionId: "session-1",
+        continuationToken: "next-1",
+        streamIndex: 1,
+      },
+      events: [started, received, waiting],
+    });
+
+    expect(prepared.session).toEqual({
+      sessionId: "session-1",
+      continuationToken: "next-1",
+      streamIndex: 3,
+    });
+    expect(prepared.events).toEqual([started, received, waiting]);
+    expect(prepared.repaired).toBe(true);
+  });
+
+  test("deduplicates replayed events before repairing the cursor", () => {
+    const firstSession = [
+      { type: "session.started", data: { runtime: "agent" } },
+      {
+        type: "message.received",
+        data: { turnId: "turn-1", message: "what is the price of apple" },
+      },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "next-1" },
+      },
+    ];
+
+    const prepared = prepareAgentThreadForResume({
+      session: {
+        sessionId: "session-1",
+        continuationToken: "next-1",
+        streamIndex: 0,
+      },
+      events: [...firstSession, ...structuredClone(firstSession)],
+    });
+
+    expect(prepared.events).toEqual(firstSession);
+    expect(prepared.session).toMatchObject({ streamIndex: 3 });
+    expect(prepared.repaired).toBe(true);
+  });
+
+  test("counts only the current session when aligning a cursor", () => {
+    const events = [
+      { type: "session.started", data: { runtime: "old" } },
+      { type: "session.completed", data: {} },
+      { type: "session.started", data: { runtime: "current" } },
+      {
+        type: "message.received",
+        data: { turnId: "turn-2", message: "what is my pnl" },
+      },
+    ];
+
+    const prepared = prepareAgentThreadForResume({
+      session: { sessionId: "session-2", streamIndex: 1 },
+      events,
+    });
+
+    expect(prepared.session).toMatchObject({ streamIndex: 2 });
+    expect(prepared.repaired).toBe(true);
   });
 });

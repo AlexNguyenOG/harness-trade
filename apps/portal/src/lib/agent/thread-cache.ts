@@ -16,6 +16,10 @@ export interface AgentPaperActionReceipt {
   message: string;
 }
 
+export interface PreparedAgentThread extends AgentThreadSnapshot {
+  repaired: boolean;
+}
+
 const THREAD_KEY = "harness.eve.thread.v2";
 const LEGACY_SESSION_KEY = "harness.eve.session.v1";
 const LEGACY_EVENTS_KEY = "harness.eve.events.v1";
@@ -91,6 +95,37 @@ export function clearAgentThread(storage: AgentThreadStorage): void {
   storage.removeItem(LEGACY_EVENTS_KEY);
 }
 
+/**
+ * A stream can be interrupted after events are persisted but before the EVE
+ * client advances its session cursor. Replaying from that stale cursor makes
+ * the next optimistic user message get replaced by an older durable turn.
+ *
+ * Keep one copy of each durable event and advance only a cursor that is
+ * provably behind the persisted events for its current session.
+ */
+export function prepareAgentThreadForResume(
+  thread: AgentThreadSnapshot,
+): PreparedAgentThread {
+  const events = uniqueEvents(thread.events);
+  const session = sessionCursor(thread.session);
+  let repaired = events.length !== thread.events.length;
+
+  if (session?.sessionId) {
+    const persistedEventCount = currentSessionEventCount(events);
+    if (session.streamIndex < persistedEventCount) {
+      session.streamIndex = persistedEventCount;
+      repaired = true;
+    }
+  }
+
+  return {
+    ...thread,
+    session: session ?? thread.session,
+    events,
+    repaired,
+  };
+}
+
 function isThreadSnapshot(value: unknown): value is AgentThreadSnapshot {
   return (
     typeof value === "object" &&
@@ -99,4 +134,77 @@ function isThreadSnapshot(value: unknown): value is AgentThreadSnapshot {
     "events" in value &&
     Array.isArray(value.events)
   );
+}
+
+function uniqueEvents(events: readonly unknown[]): readonly unknown[] {
+  const seen = new Set<string>();
+  const unique: unknown[] = [];
+
+  for (const event of events) {
+    const key = eventKey(event);
+    if (key !== null && seen.has(key)) continue;
+    if (key !== null) seen.add(key);
+    unique.push(event);
+  }
+
+  return unique;
+}
+
+function eventKey(event: unknown): string | null {
+  try {
+    return JSON.stringify(event) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function currentSessionEventCount(events: readonly unknown[]): number {
+  let sessionStart = -1;
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index];
+    if (
+      typeof event === "object" &&
+      event !== null &&
+      "type" in event &&
+      event.type === "session.started"
+    ) {
+      sessionStart = index;
+    }
+  }
+  return events.length - Math.max(sessionStart, 0);
+}
+
+function sessionCursor(value: unknown):
+  | {
+      continuationToken?: string;
+      sessionId?: string;
+      streamIndex: number;
+    }
+  | undefined {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("streamIndex" in value) ||
+    typeof value.streamIndex !== "number" ||
+    !Number.isSafeInteger(value.streamIndex) ||
+    value.streamIndex < 0
+  ) {
+    return undefined;
+  }
+
+  const cursor: {
+    continuationToken?: string;
+    sessionId?: string;
+    streamIndex: number;
+  } = { streamIndex: value.streamIndex };
+  if ("sessionId" in value && typeof value.sessionId === "string") {
+    cursor.sessionId = value.sessionId;
+  }
+  if (
+    "continuationToken" in value &&
+    typeof value.continuationToken === "string"
+  ) {
+    cursor.continuationToken = value.continuationToken;
+  }
+  return cursor;
 }

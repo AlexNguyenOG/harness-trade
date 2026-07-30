@@ -1,17 +1,26 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import {
+    Client,
+    isCurrentTurnBoundaryEvent,
+    type HandleMessageStreamEvent,
+    type SessionState,
+  } from "eve/client";
+  import {
     useEveAgent,
     type EveDynamicToolPart,
     type EveMessagePart,
   } from "eve/svelte";
+  import { onMount } from "svelte";
   import { closeChat } from "$lib/chat";
   import { AGENT_MODE_LABEL, type AgentMode } from "$lib/agent/modes";
   import { agentState, getAgentPolicy, setAgentMode, setAgentPaused } from "$lib/agent/state";
   import {
     clearAgentThread,
     loadAgentThread,
+    prepareAgentThreadForResume,
     saveAgentThread,
+    type AgentThreadSnapshot,
   } from "$lib/agent/thread-cache";
   import {
     projectHarnessTool,
@@ -57,7 +66,10 @@
   let inputEl: HTMLTextAreaElement | null = $state(null);
   let handledFocusComposerRequest = 0;
   const agentModes: AgentMode[] = ["observe", "ask", "auto"];
-  const restoredThread = browser ? loadAgentThread(localStorage) : null;
+  const cachedThread = browser ? loadAgentThread(localStorage) : null;
+  const restoredThread = cachedThread
+    ? prepareAgentThreadForResume(cachedThread)
+    : null;
   let paperActionReceipts = $state<Record<string, AgentActionResult>>({
     ...(restoredThread?.paperActionReceipts ?? {}),
   });
@@ -65,21 +77,12 @@
     restoredThread?.paperActionRuns ??
       Object.keys(restoredThread?.paperActionReceipts ?? {}),
   );
+  let recoveringThread = $state(
+    browser && isSessionState(restoredThread?.session),
+  );
+  let recoveryError = $state("");
 
-  const eve = useEveAgent({
-    initialSession: restoredThread?.session as never,
-    initialEvents: restoredThread?.events as never,
-    headers: async () => {
-      const token = await getPrivyAccessToken();
-      const policy = getAgentPolicy();
-      return {
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-        "x-harness-agent-mode": policy.mode,
-        "x-harness-agent-paused": String(policy.paused),
-        "x-harness-account-mode": accountMode,
-      };
-    },
-  });
+  let eve = $state.raw(createAgent(restoredThread));
 
   function buildEveContext(): NonNullable<
     Parameters<typeof eve.send>[0]["clientContext"]
@@ -98,7 +101,12 @@
     >;
   }
 
-  const busy = $derived(eve.status === "submitted" || eve.status === "streaming");
+  const agentWorking = $derived(
+    eve.status === "submitted" || eve.status === "streaming",
+  );
+  const busy = $derived(
+    recoveringThread || recoveryError.length > 0 || agentWorking,
+  );
   const pendingRequests = $derived(
     eve.data.messages.flatMap((message) =>
       message.parts
@@ -160,18 +168,115 @@
     }
   });
 
+  onMount(() => {
+    if (!recoveringThread || !restoredThread) return;
+    const controller = new AbortController();
+    void recoverThread(restoredThread, controller.signal);
+    return () => controller.abort();
+  });
+
   function persistCurrentThread(): void {
+    persistThreadSnapshot(eve.session, eve.events);
+  }
+
+  function persistThreadSnapshot(
+    session: unknown,
+    events: readonly unknown[],
+  ): void {
     if (!browser) return;
     try {
       saveAgentThread(localStorage, {
-        session: eve.session,
-        events: eve.events,
+        session,
+        events,
         paperActionRuns: [...paperActionRuns],
         paperActionReceipts,
       });
     } catch {
       // A private browser or exhausted quota should not break the session.
     }
+  }
+
+  function createAgent(thread: AgentThreadSnapshot | null) {
+    return useEveAgent({
+      initialSession: thread?.session as never,
+      initialEvents: thread?.events as never,
+      headers: resolveAgentHeaders,
+      onFinish(snapshot) {
+        persistThreadSnapshot(snapshot.session, snapshot.events);
+      },
+    });
+  }
+
+  async function resolveAgentHeaders(): Promise<Record<string, string>> {
+    const token = await getPrivyAccessToken();
+    const policy = getAgentPolicy();
+    return {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      "x-harness-agent-mode": policy.mode,
+      "x-harness-agent-paused": String(policy.paused),
+      "x-harness-account-mode": accountMode,
+    };
+  }
+
+  async function recoverThread(
+    thread: AgentThreadSnapshot,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (!isSessionState(thread.session)) {
+      recoveringThread = false;
+      return;
+    }
+
+    const session = new Client({ host: "", headers: resolveAgentHeaders }).session(
+      thread.session,
+    );
+    const recoveredEvents: HandleMessageStreamEvent[] = [];
+
+    try {
+      for await (const event of session.stream({ follow: false, signal })) {
+        recoveredEvents.push(event);
+      }
+
+      const lastKnownEvent =
+        recoveredEvents.at(-1) ??
+        (thread.events.at(-1) as HandleMessageStreamEvent | undefined);
+      if (
+        session.state.sessionId &&
+        (!lastKnownEvent || !isCurrentTurnBoundaryEvent(lastKnownEvent))
+      ) {
+        for await (const event of session.stream({ signal })) {
+          recoveredEvents.push(event);
+          if (isCurrentTurnBoundaryEvent(event)) break;
+        }
+      }
+
+      if (signal.aborted) return;
+      const recoveredThread = prepareAgentThreadForResume({
+        ...thread,
+        session: session.state,
+        events: [...thread.events, ...recoveredEvents],
+      });
+      persistThreadSnapshot(recoveredThread.session, recoveredThread.events);
+      eve.stop();
+      eve = createAgent(recoveredThread);
+      recoveringThread = false;
+    } catch (error) {
+      if (signal.aborted) return;
+      recoveryError =
+        error instanceof Error ? error.message : "conversation-recovery-error";
+      recoveringThread = false;
+    }
+  }
+
+  function isSessionState(value: unknown): value is SessionState {
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      "sessionId" in value &&
+      typeof value.sessionId === "string" &&
+      "streamIndex" in value &&
+      typeof value.streamIndex === "number"
+    );
   }
 
   function sendMessage(value: string): void {
@@ -299,6 +404,8 @@
   function resetSession(): void {
     paperActionRuns.clear();
     paperActionReceipts = {};
+    recoveryError = "";
+    recoveringThread = false;
     eve.reset();
     if (browser) {
       clearAgentThread(localStorage);
@@ -436,14 +543,22 @@
         </div>
       {/each}
 
-      {#if busy && !hasActiveTool}
+      {#if agentWorking && !hasActiveTool}
         <div class="thinking" aria-live="polite">
           <i aria-hidden="true"></i>
           <span>Thinking</span>
         </div>
       {/if}
 
-      {#if $privyAuth.status === "loading"}
+      {#if recoveringThread}
+        <div class="state" aria-live="polite">
+          <p>Reconnecting this conversation…</p>
+        </div>
+      {:else if recoveryError}
+        <div class="state error">
+          <p>Conversation recovery failed. Start a new session before sending.</p>
+        </div>
+      {:else if $privyAuth.status === "loading"}
         <div class="state">
           <p>Restoring your session…</p>
         </div>
