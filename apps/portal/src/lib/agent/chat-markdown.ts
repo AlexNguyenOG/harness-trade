@@ -2,8 +2,11 @@ export type ChatInline =
   | { kind: "text"; text: string }
   | { kind: "strong"; text: string }
   | { kind: "emphasis"; text: string }
+  | { kind: "strikethrough"; text: string }
   | { kind: "code"; text: string }
   | { kind: "link"; text: string; href: string };
+
+export type ChatTableAlignment = "left" | "center" | "right" | null;
 
 export type ChatMarkdownBlock =
   | {
@@ -16,7 +19,7 @@ export type ChatMarkdownBlock =
     }
   | {
       kind: "heading";
-      level: 1 | 2 | 3;
+      level: 1 | 2 | 3 | 4 | 5 | 6;
       inlines: ChatInline[];
     }
   | {
@@ -31,16 +34,32 @@ export type ChatMarkdownBlock =
       kind: "code";
       language: string;
       text: string;
+    }
+  | {
+      kind: "task-list";
+      items: Array<{ checked: boolean; inlines: ChatInline[] }>;
+    }
+  | {
+      kind: "table";
+      headers: ChatInline[][];
+      alignments: ChatTableAlignment[];
+      rows: ChatInline[][][];
+    }
+  | {
+      kind: "thematic-break";
     };
 
 const FENCE = /^```([\w-]*)\s*$/;
-const HEADING = /^(#{1,3})\s+(.+)$/;
-const UNORDERED_ITEM = /^\s*[-*]\s+(.+)$/;
+const HEADING = /^(#{1,6})\s+(.+)$/;
+const TASK_ITEM = /^\s*[-*+]\s+\[([ xX])\]\s+(.+)$/;
+const UNORDERED_ITEM = /^\s*[-*+]\s+(.+)$/;
 const ORDERED_ITEM = /^\s*\d+[.)]\s+(.+)$/;
 const QUOTE = /^\s*>\s?(.*)$/;
+const THEMATIC_BREAK = /^\s{0,3}(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$/;
+const TABLE_DELIMITER = /^:?-{3,}:?$/;
 
 /**
- * Parse the small, useful Markdown subset expected in chat without ever
+ * Parse the common GitHub-flavored Markdown shapes used in chat without ever
  * passing model output through `{@html}`.
  */
 export function parseChatMarkdown(source: string): ChatMarkdownBlock[] {
@@ -52,6 +71,13 @@ export function parseChatMarkdown(source: string): ChatMarkdownBlock[] {
     const line = lines[index] ?? "";
     if (!line.trim()) {
       index += 1;
+      continue;
+    }
+
+    const table = tableAt(lines, index);
+    if (table) {
+      blocks.push(table.block);
+      index = table.end;
       continue;
     }
 
@@ -76,10 +102,31 @@ export function parseChatMarkdown(source: string): ChatMarkdownBlock[] {
     if (heading) {
       blocks.push({
         kind: "heading",
-        level: heading[1].length as 1 | 2 | 3,
+        level: heading[1].length as 1 | 2 | 3 | 4 | 5 | 6,
         inlines: parseChatInline(heading[2]),
       });
       index += 1;
+      continue;
+    }
+
+    if (THEMATIC_BREAK.test(line)) {
+      blocks.push({ kind: "thematic-break" });
+      index += 1;
+      continue;
+    }
+
+    if (TASK_ITEM.test(line)) {
+      const items: Array<{ checked: boolean; inlines: ChatInline[] }> = [];
+      while (index < lines.length) {
+        const item = (lines[index] ?? "").match(TASK_ITEM);
+        if (!item) break;
+        items.push({
+          checked: item[1].toLowerCase() === "x",
+          inlines: parseChatInline(item[2]),
+        });
+        index += 1;
+      }
+      blocks.push({ kind: "task-list", items });
       continue;
     }
 
@@ -127,7 +174,7 @@ export function parseChatMarkdown(source: string): ChatMarkdownBlock[] {
     while (
       index < lines.length &&
       (lines[index] ?? "").trim() &&
-      !startsBlock(lines[index] ?? "")
+      !startsBlock(lines, index)
     ) {
       paragraph.push(lines[index] ?? "");
       index += 1;
@@ -177,6 +224,14 @@ export function parseChatInline(source: string): ChatInline[] {
       continue;
     }
 
+    const strikethrough = delimitedAt(source, cursor, "~~", "~~");
+    if (strikethrough) {
+      flush();
+      tokens.push({ kind: "strikethrough", text: strikethrough.text });
+      cursor = strikethrough.end;
+      continue;
+    }
+
     const link = linkAt(source, cursor);
     if (link) {
       flush();
@@ -203,14 +258,133 @@ export function parseChatInline(source: string): ChatInline[] {
   return tokens;
 }
 
-function startsBlock(line: string): boolean {
+function startsBlock(lines: string[], index: number): boolean {
+  const line = lines[index] ?? "";
   return (
+    Boolean(tableAt(lines, index)) ||
     FENCE.test(line) ||
     HEADING.test(line) ||
+    THEMATIC_BREAK.test(line) ||
+    TASK_ITEM.test(line) ||
     UNORDERED_ITEM.test(line) ||
     ORDERED_ITEM.test(line) ||
     QUOTE.test(line)
   );
+}
+
+function tableAt(
+  lines: string[],
+  index: number,
+): {
+  block: Extract<ChatMarkdownBlock, { kind: "table" }>;
+  end: number;
+} | null {
+  const headerLine = lines[index] ?? "";
+  const delimiterLine = lines[index + 1] ?? "";
+  if (!hasTablePipe(headerLine) || !hasTablePipe(delimiterLine)) return null;
+
+  const headerCells = splitTableRow(headerLine);
+  const delimiterCells = splitTableRow(delimiterLine);
+  if (
+    headerCells.length < 2 ||
+    delimiterCells.length !== headerCells.length ||
+    delimiterCells.some((cell) => !TABLE_DELIMITER.test(cell.trim()))
+  ) {
+    return null;
+  }
+
+  const alignments = delimiterCells.map(tableAlignment);
+  const rows: ChatInline[][][] = [];
+  let cursor = index + 2;
+
+  while (cursor < lines.length) {
+    const rowLine = lines[cursor] ?? "";
+    if (!rowLine.trim() || !hasTablePipe(rowLine)) break;
+    const cells = splitTableRow(rowLine);
+    rows.push(
+      headerCells.map((_, cellIndex) =>
+        parseChatInline((cells[cellIndex] ?? "").trim()),
+      ),
+    );
+    cursor += 1;
+  }
+
+  return {
+    block: {
+      kind: "table",
+      headers: headerCells.map((cell) => parseChatInline(cell.trim())),
+      alignments,
+      rows,
+    },
+    end: cursor,
+  };
+}
+
+function hasTablePipe(line: string): boolean {
+  let escaped = false;
+  let inCode = false;
+
+  for (const character of line) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (character === "`") {
+      inCode = !inCode;
+      continue;
+    }
+    if (character === "|" && !inCode) return true;
+  }
+
+  return false;
+}
+
+function splitTableRow(line: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let escaped = false;
+  let inCode = false;
+
+  for (const character of line.trim()) {
+    if (escaped) {
+      current += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (character === "`") {
+      inCode = !inCode;
+      current += character;
+      continue;
+    }
+    if (character === "|" && !inCode) {
+      cells.push(current);
+      current = "";
+      continue;
+    }
+    current += character;
+  }
+
+  if (escaped) current += "\\";
+  cells.push(current);
+  if (!cells[0]?.trim()) cells.shift();
+  if (!cells.at(-1)?.trim()) cells.pop();
+  return cells;
+}
+
+function tableAlignment(cell: string): ChatTableAlignment {
+  const value = cell.trim();
+  if (value.startsWith(":") && value.endsWith(":")) return "center";
+  if (value.endsWith(":")) return "right";
+  if (value.startsWith(":")) return "left";
+  return null;
 }
 
 function delimitedAt(

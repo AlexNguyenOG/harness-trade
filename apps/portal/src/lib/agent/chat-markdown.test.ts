@@ -46,6 +46,68 @@ describe("parseChatMarkdown", () => {
     ]);
   });
 
+  test("parses aligned tables without treating ordinary pipes as tables", () => {
+    const blocks = parseChatMarkdown(
+      [
+        "| Asset | Side | PnL |",
+        "| :--- | :---: | ---: |",
+        "| **SOL** | *Long* | +$12.40 |",
+        "| ETH | `Flat \\| waiting` | -- |",
+        "",
+        "Use BTC | SOL to compare markets.",
+      ].join("\n"),
+    );
+
+    expect(blocks[0]).toMatchObject({
+      kind: "table",
+      alignments: ["left", "center", "right"],
+    });
+    if (blocks[0]?.kind !== "table") return;
+    expect(blocks[0].headers).toHaveLength(3);
+    expect(blocks[0].rows).toHaveLength(2);
+    expect(blocks[0].rows[0]?.[0]?.[0]).toEqual({
+      kind: "strong",
+      text: "SOL",
+    });
+    expect(blocks[0].rows[1]?.[1]?.[0]).toEqual({
+      kind: "code",
+      text: "Flat | waiting",
+    });
+    expect(blocks[1]?.kind).toBe("paragraph");
+  });
+
+  test("parses task lists, strikethrough, horizontal rules, and small headings", () => {
+    const blocks = parseChatMarkdown(
+      [
+        "###### Checklist",
+        "- [x] Quote fetched",
+        "- [ ] Order reviewed",
+        "---",
+        "Risk is ~~unbounded~~ capped.",
+      ].join("\n"),
+    );
+
+    expect(blocks.map((block) => block.kind)).toEqual([
+      "heading",
+      "task-list",
+      "thematic-break",
+      "paragraph",
+    ]);
+    expect(blocks[0]).toMatchObject({ kind: "heading", level: 6 });
+    expect(blocks[1]).toMatchObject({
+      kind: "task-list",
+      items: [{ checked: true }, { checked: false }],
+    });
+    expect(blocks[3]).toMatchObject({
+      kind: "paragraph",
+      inlines: [
+        { kind: "text", text: "Risk is " },
+        { kind: "strikethrough", text: "unbounded" },
+        { kind: "text", text: " capped." },
+      ],
+    });
+  });
+
   test("allows web links and leaves unsafe links as text", () => {
     const [block] = parseChatMarkdown(
       "[Explorer](https://solscan.io/tx/abc) [bad](javascript:alert(1))",
