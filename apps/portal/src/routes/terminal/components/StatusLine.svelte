@@ -28,6 +28,8 @@
     paperMode: boolean;
     equityUsd: number;
     upnlUsd: number;
+    /** Day P&L vs UTC-day equity baseline (null until first sample). */
+    sessionPnlUsd: number | null;
     freeCollateralUsd: number;
     fundingPercent: number | null;
     walletAddress: string;
@@ -40,11 +42,17 @@
     status,
     onshowshortcuts,
     onjumptopositions,
+    onreconnect,
   }: {
     status: StatusModel;
     onshowshortcuts: () => void;
     onjumptopositions: () => void;
+    onreconnect?: () => void;
   } = $props();
+
+  const streamNeedsHelp = $derived(
+    status.streamHealth === "offline" || status.streamHealth === "stale",
+  );
 </script>
 
 <footer class="status-line" aria-label="Terminal status">
@@ -54,7 +62,21 @@
   <span class="sl-sep" aria-hidden="true"></span>
   <span>{status.symbol} · {status.sessionNote}</span>
   <span class="sl-sep" aria-hidden="true"></span>
-  <span class:positive={status.streamHealth === "live"} class:warn-txt={status.streamHealth !== "live"}>WS {status.streamHealth}</span>
+  {#if streamNeedsHelp && onreconnect}
+    <button
+      type="button"
+      class="sl-reconnect warn-txt"
+      title="Reconnect market data"
+      onclick={onreconnect}
+    >
+      WS {status.streamHealth} · retry
+    </button>
+  {:else}
+    <span
+      class:positive={status.streamHealth === "live"}
+      class:warn-txt={status.streamHealth !== "live"}
+    >WS {status.streamHealth}</span>
+  {/if}
   <span>RPC {status.rpcLatencyMs !== null ? `${status.rpcLatencyMs}ms` : "--"}</span>
   {#if status.apiSlotLag !== null}
     <span class:warn-txt={status.apiSlotLag > 150} title="Phoenix indexer slots behind the chain tip">
@@ -100,6 +122,20 @@
           0,
         )}</span
       >
+      {#if status.sessionPnlUsd !== null}
+        <span
+          class:positive={status.sessionPnlUsd >= 0}
+          class:negative={status.sessionPnlUsd < 0}
+          title="Today vs UTC-day equity baseline"
+        >
+          Today {formatDisplayMoneySigned(
+            status.sessionPnlUsd,
+            status.displayCurrency,
+            status.fxRate,
+            2,
+          )}
+        </span>
+      {/if}
       <span class:positive={status.upnlUsd >= 0} class:negative={status.upnlUsd < 0}>
         uPNL {formatDisplayMoneySigned(
           status.upnlUsd,
@@ -162,6 +198,21 @@
   }
 
   .sl-help:hover { color: var(--ink); }
+
+  .sl-reconnect {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .sl-reconnect:hover {
+    color: var(--ink);
+  }
 
   /* Account money in the fixed line: equity/uPnL/free/funding, one click
      from the perp desk. */

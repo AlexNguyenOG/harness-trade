@@ -1,10 +1,8 @@
 # Run the Harness portal Vite server and restart it if it exits.
-# Use this from a normal PowerShell / Terminal window (outside Cursor) so
-# the process is not torn down when agent shells end.
+# Prefer scripts/keep-portal-dev.cmd (loops even if this script is Ctrl+C'd).
 #
-#   .\scripts\keep-portal-dev.ps1
+#   .\scripts\keep-portal-dev.cmd
 #   .\scripts\keep-portal-dev.ps1 3001
-#   .\scripts\keep-portal-dev.cmd   # opens a dedicated window
 
 param(
   [int]$Port = 3001
@@ -33,15 +31,33 @@ function Write-Log([string]$Message) {
   Add-Content -Path $Log -Value $line -Encoding utf8
 }
 
-Write-Host "Harness portal dev server on http://127.0.0.1:${Port}/terminal"
+# Treat Ctrl+C as a restart signal inside the .cmd outer loop, not a silent stop.
+[Console]::TreatControlCAsInput = $false
+
+Write-Host "Harness portal on http://127.0.0.1:${Port}/terminal"
 Write-Host "Log: $Log"
-Write-Host "Ctrl+C stops the keeper (and the current Vite child)."
+Write-Host "Close this window to stop. (Ctrl+C restarts via the .cmd loop.)"
 Write-Host ""
 
 while ($true) {
   Write-Log "starting vite :$Port"
-  # cmd.exe redirection keeps UTF-8 and mirrors the bash keeper.
-  cmd /c "bunx vite --host 127.0.0.1 --port $Port >> `"$Log`" 2>&1"
-  Write-Log "vite exited code=$LASTEXITCODE; restarting in 2s"
+
+  # Run Vite as its own process so we can detect death via Wait + port check.
+  $proc = Start-Process -FilePath "bun" `
+    -ArgumentList @("x", "vite", "--host", "127.0.0.1", "--port", "$Port") `
+    -WorkingDirectory $Portal `
+    -NoNewWindow `
+    -PassThru
+
+  if (-not $proc) {
+    Write-Log "failed to spawn vite; retrying in 2s"
+    Start-Sleep -Seconds 2
+    continue
+  }
+
+  Write-Host "vite pid=$($proc.Id) — waiting"
+  Wait-Process -Id $proc.Id -ErrorAction SilentlyContinue
+  $code = $proc.ExitCode
+  Write-Log "vite exited code=$code; restarting in 2s"
   Start-Sleep -Seconds 2
 }
