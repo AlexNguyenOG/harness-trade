@@ -95,7 +95,7 @@ function findPosition(
   return position;
 }
 
-async function currentPhoenixPrice(symbol: string): Promise<number> {
+export async function currentPhoenixPrice(symbol: string): Promise<number> {
   const params = new URLSearchParams({
     symbol: normalizeSymbol(symbol),
     timeframe: "1m",

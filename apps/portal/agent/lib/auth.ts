@@ -56,12 +56,6 @@ export function transactionApproval(
   } catch {
     return { type: "denied" as const, reason: "Session owner mismatch." };
   }
-  if (principal.accountMode !== "live") {
-    return {
-      type: "denied" as const,
-      reason: "Live account mode is required for server transactions.",
-    };
-  }
   if (principal.paused) {
     return { type: "denied" as const, reason: "Money-PAUSE is engaged." };
   }
@@ -69,6 +63,12 @@ export function transactionApproval(
     return { type: "denied" as const, reason: "Observe mode is read-only." };
   }
   if (principal.agentMode === "ask") return "user-approval" as const;
+  if (principal.accountMode === "paper") {
+    return {
+      type: "approved" as const,
+      reason: "Auto mode permits paper execution.",
+    };
+  }
 
   const input = ctx.toolInput ?? {};
   const notional = Number(input.sizeUsd ?? input.amountUsd ?? 0);

@@ -7,6 +7,13 @@ export interface AgentThreadStorage {
 export interface AgentThreadSnapshot {
   session: unknown;
   events: readonly unknown[];
+  paperActionRuns?: readonly string[];
+  paperActionReceipts?: Record<string, AgentPaperActionReceipt>;
+}
+
+export interface AgentPaperActionReceipt {
+  ok: boolean;
+  message: string;
 }
 
 const THREAD_KEY = "harness.eve.thread.v2";
@@ -18,7 +25,16 @@ export function loadAgentThread(
 ): AgentThreadSnapshot | null {
   const current = readJson(storage, THREAD_KEY);
   if (isThreadSnapshot(current)) {
-    return { session: current.session, events: current.events };
+    return {
+      session: current.session,
+      events: current.events,
+      ...(Array.isArray(current.paperActionRuns)
+        ? { paperActionRuns: current.paperActionRuns }
+        : {}),
+      ...(isReceiptMap(current.paperActionReceipts)
+        ? { paperActionReceipts: current.paperActionReceipts }
+        : {}),
+    };
   }
 
   const session = readJson(storage, LEGACY_SESSION_KEY);
@@ -46,7 +62,26 @@ export function saveAgentThread(
       version: 2,
       session: thread.session,
       events: thread.events,
+      paperActionRuns: thread.paperActionRuns,
+      paperActionReceipts: thread.paperActionReceipts,
     }),
+  );
+}
+
+function isReceiptMap(
+  value: unknown,
+): value is Record<string, AgentPaperActionReceipt> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  return Object.values(value).every(
+    (receipt) =>
+      typeof receipt === "object" &&
+      receipt !== null &&
+      "ok" in receipt &&
+      typeof receipt.ok === "boolean" &&
+      "message" in receipt &&
+      typeof receipt.message === "string",
   );
 }
 

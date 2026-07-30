@@ -31,6 +31,22 @@ describe("agent thread cache", () => {
     expect(loadAgentThread(storage)).toEqual(thread);
   });
 
+  test("restores completed client paper actions without replaying them", () => {
+    const storage = memoryStorage();
+    const thread = {
+      session: { sessionId: "eve-session-paper" },
+      events: [{ type: "tool-result", toolCallId: "call-1" }],
+      paperActionRuns: ["call-1"],
+      paperActionReceipts: {
+        "call-1": { ok: true, message: "paper long SOL $10 @ 1x" },
+      },
+    };
+
+    saveAgentThread(storage, thread);
+
+    expect(loadAgentThread(storage)).toEqual(thread);
+  });
+
   test("restores conversations saved by the previous two-key cache", () => {
     const storage = memoryStorage();
     const session = { sessionId: "existing-session", cursor: "event-2" };

@@ -1,7 +1,10 @@
 import { type ApprovalContext, defineTool } from "eve/tools";
 import { z } from "zod";
-import { transactionApproval } from "../lib/auth";
-import { executeTrade } from "../lib/trading";
+import { requireAgentPrincipal, transactionApproval } from "../lib/auth";
+import {
+  executeTrade,
+  type ExecuteTradeInput,
+} from "../lib/trading";
 
 const symbol = z
   .string()
@@ -10,7 +13,7 @@ const symbol = z
   .describe("Venue symbol without -PERP, for example SOL or BTC.");
 const subaccountIndex = z.number().int().min(0).max(255).optional();
 
-const inputSchema = z.discriminatedUnion("operation", [
+const tradeSchema = z.discriminatedUnion("operation", [
   z.object({
     operation: z.literal("place_perp"),
     symbol,
@@ -79,15 +82,46 @@ const inputSchema = z.discriminatedUnion("operation", [
   }),
 ]);
 
+const inputSchema = z.object({
+  trade: tradeSchema.describe("The exact trade operation to execute."),
+});
 type Input = z.infer<typeof inputSchema>;
+
+function paperAction(input: ExecuteTradeInput) {
+  const name =
+    input.operation === "place_perp"
+      ? "place_perp_order"
+      : input.operation === "place_spot"
+        ? "place_spot_order"
+        : input.operation;
+  return {
+    ok: true,
+    status: "pending-client",
+    paperAction: { name, args: input },
+    presentation: {
+      schema: "harness.presentation.v1",
+      kind: "execution",
+      title: "Paper action ready",
+      summary: "Applying the approved action to the local paper ledger.",
+      status: "running",
+    },
+  };
+}
 
 export default defineTool({
   description:
-    "Execute an authenticated live trade, cancellation, close, reversal, TP/SL update, or margin action. The server resolves the signed-in user's isolated EVE wallet, builds and simulates the transaction, then signs and broadcasts inside the server runtime. Never accepts wallet ids, keys, or transactions from the model.",
+    "Execute an authenticated paper or live trade, cancellation, close, reversal, TP/SL update, or margin action. Paper actions are handed to the typed client ledger; live actions resolve the signed-in user's isolated EVE wallet and stay server-authoritative. Never accepts wallet ids, keys, or transactions from the model.",
   inputSchema,
   approval: (ctx: ApprovalContext<Input>) =>
-    transactionApproval(
-      ctx as unknown as ApprovalContext<Record<string, unknown>>,
-    ),
-  execute: executeTrade,
+    transactionApproval({
+      ...ctx,
+      toolInput: ctx.toolInput?.trade,
+    } as ApprovalContext<Record<string, unknown>>),
+  execute: async (input, ctx) => {
+    const trade = input.trade as ExecuteTradeInput;
+    if (requireAgentPrincipal(ctx).accountMode === "paper") {
+      return paperAction(trade);
+    }
+    return executeTrade(trade, ctx);
+  },
 });

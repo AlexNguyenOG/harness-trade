@@ -18,6 +18,14 @@
     type WorkstreamCard,
   } from "$lib/agent/workstream";
   import {
+    AGENT_ACTION_META,
+    type AgentActionName,
+  } from "$lib/agent/actions";
+  import {
+    executeAgentAction,
+    type AgentActionResult,
+  } from "$lib/agent/host";
+  import {
     getPrivyAccessToken,
     privyAuth,
   } from "$lib/privy-auth";
@@ -46,6 +54,13 @@
   let handledFocusComposerRequest = 0;
   const agentModes: AgentMode[] = ["observe", "ask", "auto"];
   const restoredThread = browser ? loadAgentThread(localStorage) : null;
+  let paperActionReceipts = $state<Record<string, AgentActionResult>>({
+    ...(restoredThread?.paperActionReceipts ?? {}),
+  });
+  const paperActionRuns = new Set<string>(
+    restoredThread?.paperActionRuns ??
+      Object.keys(restoredThread?.paperActionReceipts ?? {}),
+  );
 
   const eve = useEveAgent({
     initialSession: restoredThread?.session as never,
@@ -106,12 +121,34 @@
     persistCurrentThread();
   });
 
+  $effect(() => {
+    if (!browser || accountMode !== "paper") return;
+    const parts = eve.data.messages.flatMap((message) =>
+      message.parts.filter(isDynamicToolPart),
+    );
+    for (const part of parts) {
+      const action = paperActionFromPart(part);
+      if (!action || paperActionRuns.has(part.toolCallId)) continue;
+      paperActionRuns.add(part.toolCallId);
+      persistCurrentThread();
+      void executeAgentAction(action.name, action.args).then((receipt) => {
+        paperActionReceipts = {
+          ...paperActionReceipts,
+          [part.toolCallId]: receipt,
+        };
+        persistCurrentThread();
+      });
+    }
+  });
+
   function persistCurrentThread(): void {
     if (!browser) return;
     try {
       saveAgentThread(localStorage, {
         session: eve.session,
         events: eve.events,
+        paperActionRuns: [...paperActionRuns],
+        paperActionReceipts,
       });
     } catch {
       // A private browser or exhausted quota should not break the session.
@@ -147,14 +184,51 @@
   }
 
   function projectPart(part: EveDynamicToolPart): WorkstreamCard {
+    const paperReceipt = paperActionReceipts[part.toolCallId];
     return projectHarnessTool({
       toolName: part.toolName,
       state: part.state,
       input: part.input,
-      output: part.output,
+      output: paperReceipt
+        ? {
+            presentation: {
+              schema: "harness.presentation.v1",
+              kind: "receipt",
+              title: paperReceipt.ok
+                ? "Paper action confirmed"
+                : "Paper action failed",
+              summary: paperReceipt.message,
+              status: paperReceipt.ok ? "success" : "failed",
+            },
+          }
+        : part.output,
       errorText: part.errorText,
       approvalPending: Boolean(part.toolMetadata?.eve?.inputRequest),
     });
+  }
+
+  function paperActionFromPart(
+    part: EveDynamicToolPart,
+  ): { name: AgentActionName; args: Record<string, unknown> } | null {
+    if (part.state !== "output-available") return null;
+    const output = asRecord(part.output);
+    const action = asRecord(output?.paperAction);
+    const name = action?.name;
+    const args = asRecord(action?.args);
+    if (
+      typeof name !== "string" ||
+      !AGENT_ACTION_META.some((entry) => entry.name === name) ||
+      !args
+    ) {
+      return null;
+    }
+    return { name: name as AgentActionName, args };
+  }
+
+  function asRecord(value: unknown): Record<string, unknown> | null {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
   }
 
   async function answer(requestId: string, approved: boolean): Promise<void> {
@@ -171,6 +245,8 @@
   }
 
   function resetSession(): void {
+    paperActionRuns.clear();
+    paperActionReceipts = {};
     eve.reset();
     if (browser) {
       clearAgentThread(localStorage);

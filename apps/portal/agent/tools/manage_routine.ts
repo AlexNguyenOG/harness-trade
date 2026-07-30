@@ -16,7 +16,7 @@ const check = z.discriminatedUnion("kind", [
   }),
 ]);
 
-const inputSchema = z.discriminatedUnion("action", [
+const routineSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list") }),
   z.object({
     action: z.literal("create"),
@@ -41,6 +41,9 @@ const inputSchema = z.discriminatedUnion("action", [
   }),
 ]);
 
+const inputSchema = z.object({
+  routine: routineSchema.describe("The routine operation to perform."),
+});
 type Input = z.infer<typeof inputSchema>;
 
 export default defineTool({
@@ -48,7 +51,7 @@ export default defineTool({
     "List or manage authenticated user-owned recurring market checks. Routines are strictly observe-and-alert only: they read public Phoenix prices and save private alerts, and can never sign, broadcast, approve, or execute transactions. Confirm timezone and first run before creation.",
   inputSchema,
   approval(ctx: ApprovalContext<Input>) {
-    if (ctx.toolInput?.action === "list") {
+    if (ctx.toolInput?.routine.action === "list") {
       return {
         type: "approved" as const,
         reason: "Listing owner-scoped observe-only routines is read-only.",
@@ -57,35 +60,36 @@ export default defineTool({
     return "user-approval" as const;
   },
   async execute(input, ctx) {
+    const request = input.routine;
     const principal = requireAgentPrincipal(ctx);
-    if (input.action === "list") {
+    if (request.action === "list") {
       return { routines: await routineStore.list(principal.userId) };
     }
-    if (input.action === "create") {
+    if (request.action === "create") {
       return {
         routine: await routineStore.create(principal.userId, {
-          name: input.name,
-          check: input.check,
-          everyMinutes: input.everyMinutes,
-          timezone: input.timezone,
-          firstRunAt: input.firstRunAt,
+          name: request.name,
+          check: request.check,
+          everyMinutes: request.everyMinutes,
+          timezone: request.timezone,
+          firstRunAt: request.firstRunAt,
         }),
       };
     }
-    if (input.action === "update") {
-      const { action: _action, id, ...patch } = input;
+    if (request.action === "update") {
+      const { action: _action, id, ...patch } = request;
       return {
         routine: await routineStore.update(principal.userId, id, patch),
       };
     }
     const status =
-      input.action === "pause"
+      request.action === "pause"
         ? "paused"
-        : input.action === "resume"
+        : request.action === "resume"
           ? "active"
           : "deleted";
     return {
-      routine: await routineStore.update(principal.userId, input.id, {
+      routine: await routineStore.update(principal.userId, request.id, {
         status,
       }),
     };
