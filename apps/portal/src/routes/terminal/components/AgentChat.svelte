@@ -23,11 +23,13 @@
     type WorkstreamCard,
   } from "$lib/agent/workstream";
   import { getPrivyAccessToken, privyAuth } from "$lib/privy-auth";
+  import { llmProfileHeaderValue } from "$lib/agent/llm-profile-selection";
   import { projectPriceQuote } from "$lib/agent/price-presentation";
   import MarkdownMessage from "./MarkdownMessage.svelte";
   import PriceQuoteCard from "./PriceQuoteCard.svelte";
   import ToolActivity from "./ToolActivity.svelte";
   import AgentSkillsPanel from "./AgentSkillsPanel.svelte";
+  import AgentModelsPanel from "./AgentModelsPanel.svelte";
 
   let {
     buildContext,
@@ -65,11 +67,13 @@
   async function resolveConversationHeaders(): Promise<Record<string, string>> {
     const token = await getPrivyAccessToken();
     const policy = getAgentPolicy();
+    const llmProfile = llmProfileHeaderValue();
     return {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       "x-harness-agent-mode": policy.mode,
       "x-harness-agent-paused": String(policy.paused),
       "x-harness-account-mode": accountMode,
+      ...(llmProfile ? { "x-harness-llm-profile": llmProfile } : {}),
     };
   }
 
@@ -267,6 +271,7 @@
       </div>
     </div>
     <div class="agent-head-right">
+      <AgentModelsPanel {onRequestAuth} />
       <AgentSkillsPanel {onRequestAuth} />
       <button
         class="ghost"

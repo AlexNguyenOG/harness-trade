@@ -58,6 +58,12 @@ const privyAuth: AuthFn<Request> = withAuthChallenges(
           request.headers.get("x-harness-agent-paused") === "true"
             ? "true"
             : "false",
+        llmProfileId: (() => {
+          const value =
+            request.headers.get("x-harness-llm-profile")?.trim() ?? "";
+          if (value === "platform") return "platform";
+          return /^[0-9a-f]{32}$/i.test(value) ? value : "";
+        })(),
       },
     };
   },
