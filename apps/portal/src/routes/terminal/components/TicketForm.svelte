@@ -3,11 +3,12 @@
   import { bookLevelNotional, formatBookPrice } from "$lib/terminal/book";
   import type { PerpTicket } from "$lib/terminal/perp-ticket";
   import { stepInput } from "$lib/terminal/step-input";
-  import { SL_CHIP_PCTS, TP_CHIP_PCTS } from "$lib/terminal/trade-math";
+  import { SL_CHIP_PCTS, TP_CHIP_PCTS, fmtTriggerPrice } from "$lib/terminal/trade-math";
   import {
     formatDisplayMoney,
     type DisplayCurrencyCode,
   } from "$lib/terminal/display-currency";
+  import { track } from "$lib/telemetry";
   import { formatNumber, formatPercent, formatPrice } from "$lib/utils";
 
   // Perp ticket form: state (the nine fields + every ticket-only derived)
@@ -151,9 +152,84 @@
     tpPnlUsd,
     slPnlUsd,
     riskNotionalUsd,
+    ghostTp,
+    ghostSl,
+    ghostSymbol,
     setTakeProfitPct,
     setStopLossPct,
+    acceptGhostTp,
+    acceptGhostSl,
+    dismissGhostTp,
+    dismissGhostSl,
   } = ticket;
+
+  // Telemetry: once per ghost value per field (not per render).
+  let shownTpKey = "";
+  let shownSlKey = "";
+  $effect(() => {
+    const ghost = $ghostTp;
+    const symbol = $ghostSymbol;
+    if (!ghost) {
+      shownTpKey = "";
+      return;
+    }
+    const key = `${symbol}:${ghost.source}:${ghost.value}`;
+    if (key === shownTpKey) return;
+    shownTpKey = key;
+    track("ghost_shown", { field: "tp", source: ghost.source, symbol });
+  });
+  $effect(() => {
+    const ghost = $ghostSl;
+    const symbol = $ghostSymbol;
+    if (!ghost) {
+      shownSlKey = "";
+      return;
+    }
+    const key = `${symbol}:${ghost.source}:${ghost.value}`;
+    if (key === shownSlKey) return;
+    shownSlKey = key;
+    track("ghost_shown", { field: "sl", source: ghost.source, symbol });
+  });
+
+  function onTpKeydown(event: KeyboardEvent): void {
+    if (event.key === "Tab" && !event.shiftKey && $ghostTp) {
+      event.preventDefault();
+      const source = $ghostTp.source;
+      const symbol = $ghostSymbol;
+      if (acceptGhostTp()) {
+        track("ghost_accepted", { field: "tp", source, symbol });
+      }
+      return;
+    }
+    if (event.key === "Escape" && $ghostTp) {
+      event.preventDefault();
+      event.stopPropagation();
+      const source = $ghostTp.source;
+      const symbol = $ghostSymbol;
+      dismissGhostTp();
+      track("ghost_dismissed", { field: "tp", source, symbol });
+    }
+  }
+
+  function onSlKeydown(event: KeyboardEvent): void {
+    if (event.key === "Tab" && !event.shiftKey && $ghostSl) {
+      event.preventDefault();
+      const source = $ghostSl.source;
+      const symbol = $ghostSymbol;
+      if (acceptGhostSl()) {
+        track("ghost_accepted", { field: "sl", source, symbol });
+      }
+      return;
+    }
+    if (event.key === "Escape" && $ghostSl) {
+      event.preventDefault();
+      event.stopPropagation();
+      const source = $ghostSl.source;
+      const symbol = $ghostSymbol;
+      dismissGhostSl();
+      track("ghost_dismissed", { field: "sl", source, symbol });
+    }
+  }
 
   // ── Size presets ───────────────────────────────────────────────────
   // USD mode: % of free collateral × leverage; Max keeps the same $0.01
@@ -276,12 +352,22 @@
           <em class="field-note">{$tradeSide === "buy" ? "above" : "below"} entry</em>
         {/if}
       </span>
-      <input
-        bind:value={$tradeTakeProfit}
-        inputmode="decimal"
-        placeholder="optional"
-        use:stepInput={{ kind: "price" }}
-      />
+      <span class="ghost-input">
+        <input
+          bind:value={$tradeTakeProfit}
+          inputmode="decimal"
+          placeholder="optional"
+          use:stepInput={{ kind: "price" }}
+          onkeydown={onTpKeydown}
+        />
+        {#if $ghostTp}
+          <span
+            class="ghost-overlay"
+            aria-hidden="true"
+            title={$ghostTp.provenance}
+          >{fmtTriggerPrice($ghostTp.value)}</span>
+        {/if}
+      </span>
     </label>
     <div class="chip-row" role="group" aria-label="Quick take profit">
       {#each TP_CHIP_PCTS as pct (pct)}
@@ -310,12 +396,22 @@
           <em class="field-note field-note-amber">sets your size</em>
         {/if}
       </span>
-      <input
-        bind:value={$tradeStopLoss}
-        inputmode="decimal"
-        placeholder={$sizingMode === "risk" ? "required" : "optional"}
-        use:stepInput={{ kind: "price" }}
-      />
+      <span class="ghost-input">
+        <input
+          bind:value={$tradeStopLoss}
+          inputmode="decimal"
+          placeholder={$sizingMode === "risk" ? "required" : "optional"}
+          use:stepInput={{ kind: "price" }}
+          onkeydown={onSlKeydown}
+        />
+        {#if $ghostSl}
+          <span
+            class="ghost-overlay"
+            aria-hidden="true"
+            title={$ghostSl.provenance}
+          >{fmtTriggerPrice($ghostSl.value)}</span>
+        {/if}
+      </span>
     </label>
     <div class="chip-row" role="group" aria-label="Quick stop loss">
       {#each SL_CHIP_PCTS as pct (pct)}
@@ -545,6 +641,25 @@
     display: grid;
     gap: 0.3rem;
     align-content: start;
+  }
+
+  .ghost-input {
+    position: relative;
+    display: block;
+  }
+
+  .ghost-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    padding: 0 0.55rem;
+    pointer-events: none;
+    color: var(--faint);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem;
+    letter-spacing: normal;
+    text-transform: none;
   }
 
   .pct-chip {

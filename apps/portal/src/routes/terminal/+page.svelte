@@ -1202,6 +1202,10 @@
     stateKnown: phoenixStateKnown,
     chainVerified: paperMode || phoenixTrader?.chainVerified === true,
     collateralUsd: phoenixCollateral,
+    candles: tradeMode === "perps" ? chartPoints : [],
+    prevDayHigh: tradeMode === "perps" ? structLevels.prevDayHigh : null,
+    prevDayLow: tradeMode === "perps" ? structLevels.prevDayLow : null,
+    symbol: selectedSymbol,
   });
   $: perpTicket.setNow(nowMs);
 

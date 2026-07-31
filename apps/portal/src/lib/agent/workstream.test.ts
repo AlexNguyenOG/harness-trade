@@ -80,4 +80,57 @@ describe("projectHarnessTool", () => {
     expect(card.status).toBe("waiting");
     expect(card.statusLabel).toBe("reconciliation needed");
   });
+
+  test("bare output-available is never success without a presentation", () => {
+    const card = projectHarnessTool({
+      toolName: "execute_trade",
+      state: "output-available",
+      output: {
+        summary: "Opened SOL long.",
+        explorerUrls: ["https://solscan.io/tx/signature"],
+      },
+    });
+    expect(card.status).toBe("running");
+  });
+
+  test("pending-client stays running until a Receipt arrives", () => {
+    const card = projectHarnessTool({
+      toolName: "execute_trade",
+      state: "output-available",
+      output: {
+        ok: true,
+        status: "pending-client",
+        paperAction: { name: "place_perp_order", args: {} },
+        presentation: {
+          schema: "harness.presentation.v1",
+          kind: "execution",
+          title: "Paper action ready",
+          summary: "Applying the approved action to the local paper ledger.",
+          status: "running",
+        },
+      },
+    });
+    expect(card.kind).toBe("execution");
+    expect(card.status).toBe("running");
+    expect(card.statusLabel).toBe("working");
+  });
+
+  test("confirmed paper Receipt presentation is success", () => {
+    const card = projectHarnessTool({
+      toolName: "execute_trade",
+      state: "output-available",
+      output: {
+        presentation: {
+          schema: "harness.presentation.v1",
+          kind: "receipt",
+          title: "Paper action confirmed",
+          summary: "Filled on the paper ledger.",
+          status: "success",
+        },
+      },
+    });
+    expect(card.kind).toBe("receipt");
+    expect(card.status).toBe("success");
+    expect(card.statusLabel).toBe("done");
+  });
 });

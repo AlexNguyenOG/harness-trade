@@ -300,6 +300,15 @@
               status: "failed" as const,
             }
       : null;
+    const rawOutput =
+      part.output && typeof part.output === "object"
+        ? (part.output as Record<string, unknown>)
+        : null;
+    const pendingPaperAction =
+      !paperReceipt &&
+      rawOutput !== null &&
+      rawOutput.paperAction !== undefined &&
+      rawOutput.paperAction !== null;
     return projectHarnessTool({
       toolName: part.toolName,
       state: part.state,
@@ -314,7 +323,20 @@
               status: receiptPresentation?.status,
             },
           }
-        : part.output,
+        : pendingPaperAction
+          ? {
+              ...rawOutput,
+              status: "pending-client",
+              presentation: {
+                schema: "harness.presentation.v1",
+                kind: "execution",
+                title: "Applying to paper ledger…",
+                summary:
+                  "Waiting for the local paper ledger Receipt before this action counts as done.",
+                status: "running",
+              },
+            }
+          : part.output,
       errorText: part.errorText,
       approvalPending: part.approvalPending,
     });
