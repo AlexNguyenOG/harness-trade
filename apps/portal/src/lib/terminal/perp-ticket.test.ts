@@ -31,6 +31,10 @@ function inputs(overrides: Partial<PerpTicketInputs> = {}): PerpTicketInputs {
     stateKnown: true,
     chainVerified: true,
     collateralUsd: 1_000,
+    candles: [],
+    prevDayHigh: null,
+    prevDayLow: null,
+    symbol: "SOL",
     ...overrides,
   };
 }
@@ -199,5 +203,69 @@ describe("funding gate", () => {
     ticket.setInputs(inputs({ collateralUsd: 5, chainVerified: false }));
     ticket.setNow(Date.now() + 10_000);
     expect(get(ticket.needsPhoenixFunding)).toBe(false);
+  });
+});
+
+describe("ghost TP/SL", () => {
+  test("ghosts appear from prev-day structure when fields are empty", () => {
+    const ticket = createPerpTicket();
+    ticket.setInputs(
+      inputs({
+        prevDayLow: 95,
+        prevDayHigh: 110,
+      }),
+    );
+    ticket.tradeType.set("limit");
+    ticket.tradeLimitPrice.set("100");
+    expect(get(ticket.ghostSl)?.source).toBe("prev-day");
+    expect(get(ticket.ghostSl)?.value).toBeCloseTo(95 * (1 - 0.3 / 100));
+    // TP needs a stop distance for r-multiple when no opposing swings.
+    ticket.tradeStopLoss.set("95");
+    expect(get(ticket.ghostTp)?.source).toBe("r-multiple");
+    expect(get(ticket.ghostSl)).toBeNull(); // field no longer empty
+  });
+
+  test("filled fields never show ghosts; dismiss hides until side/symbol reset", () => {
+    const ticket = createPerpTicket();
+    ticket.setInputs(inputs({ prevDayLow: 95 }));
+    ticket.tradeType.set("limit");
+    ticket.tradeLimitPrice.set("100");
+    expect(get(ticket.ghostSl)).not.toBeNull();
+
+    ticket.dismissGhostSl();
+    expect(get(ticket.ghostSl)).toBeNull();
+
+    ticket.tradeSide.set("sell");
+    ticket.setInputs(inputs({ prevDayHigh: 110, symbol: "SOL" }));
+    ticket.tradeType.set("limit");
+    ticket.tradeLimitPrice.set("100");
+    expect(get(ticket.ghostSl)).not.toBeNull();
+
+    ticket.dismissGhostSl();
+    ticket.setInputs(inputs({ prevDayHigh: 110, symbol: "BTC" }));
+    expect(get(ticket.ghostSl)).not.toBeNull();
+  });
+
+  test("acceptGhostSl writes fmtTriggerPrice and drives risk sizing", () => {
+    const ticket = createPerpTicket();
+    ticket.setInputs(inputs({ prevDayLow: 95 }));
+    ticket.tradeType.set("limit");
+    ticket.tradeLimitPrice.set("100");
+    ticket.sizingMode.set("risk");
+    ticket.tradeRiskUsd.set("50");
+    expect(ticket.acceptGhostSl()).toBe(true);
+    const sl = get(ticket.tradeStopLoss);
+    expect(sl).toBe(fmtTriggerPrice(95 * (1 - 0.3 / 100)));
+    expect(get(ticket.riskNotionalUsd)).toBe(riskNotional(50, 100, Number(sl)));
+    expect(get(ticket.ghostSl)).toBeNull();
+  });
+
+  test("no candles and no prev-day levels → no ghosts", () => {
+    const ticket = createPerpTicket();
+    ticket.setInputs(inputs());
+    ticket.tradeType.set("limit");
+    ticket.tradeLimitPrice.set("100");
+    expect(get(ticket.ghostTp)).toBeNull();
+    expect(get(ticket.ghostSl)).toBeNull();
   });
 });

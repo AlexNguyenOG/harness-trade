@@ -10,7 +10,13 @@
 // +page.svelte on purpose: this module holds state and pure math only, and
 // must never import web3.js or issue network calls.
 import { derived, get, writable } from "svelte/store";
-import type { DepthLevel } from "$lib/phoenix-market-data";
+import type { DepthLevel, MarketPoint } from "$lib/phoenix-market-data";
+import {
+  GHOST_DEFAULTS,
+  type GhostValue,
+  ghostStop,
+  ghostTakeProfit,
+} from "./autocomplete";
 import {
   buildTradePreview,
   fmtTriggerPrice,
@@ -38,6 +44,11 @@ export type PerpTicketInputs = {
   stateKnown: boolean;
   chainVerified: boolean;
   collateralUsd: number;
+  // Chart structure for TP/SL ghosts (page-injected; never fetched here).
+  candles: MarketPoint[];
+  prevDayHigh: number | null;
+  prevDayLow: number | null;
+  symbol: string;
 };
 
 type MarketInputs = Pick<
@@ -51,6 +62,10 @@ type VisibilityInputs = Pick<
 type AccountInputs = Pick<
   PerpTicketInputs,
   "hasAuthority" | "stateKnown" | "chainVerified" | "collateralUsd"
+>;
+type StructureInputs = Pick<
+  PerpTicketInputs,
+  "candles" | "prevDayHigh" | "prevDayLow" | "symbol"
 >;
 
 export function createPerpTicket() {
@@ -89,7 +104,29 @@ export function createPerpTicket() {
     chainVerified: false,
     collateralUsd: 0,
   });
+  const structure = writable<StructureInputs>({
+    candles: [],
+    prevDayHigh: null,
+    prevDayLow: null,
+    symbol: "",
+  });
   const now = writable(0);
+  const ghostTpDismissed = writable(false);
+  const ghostSlDismissed = writable(false);
+
+  function clearGhostDismissed(): void {
+    ghostTpDismissed.set(false);
+    ghostSlDismissed.set(false);
+  }
+
+  // Side flips via bind ($tradeSide = …) bypass setSide — subscribe so
+  // dismissed flags always reset when the ticket side changes.
+  let lastSide = get(tradeSide);
+  tradeSide.subscribe((side) => {
+    if (side === lastSide) return;
+    lastSide = side;
+    clearGhostDismissed();
+  });
 
   let lastInputs: PerpTicketInputs | null = null;
   function setInputs(next: PerpTicketInputs): void {
@@ -135,6 +172,23 @@ export function createPerpTicket() {
         stateKnown: next.stateKnown,
         chainVerified: next.chainVerified,
         collateralUsd: next.collateralUsd,
+      });
+    }
+    if (
+      !prev ||
+      prev.candles !== next.candles ||
+      prev.prevDayHigh !== next.prevDayHigh ||
+      prev.prevDayLow !== next.prevDayLow ||
+      prev.symbol !== next.symbol
+    ) {
+      if (prev && prev.symbol !== next.symbol) {
+        clearGhostDismissed();
+      }
+      structure.set({
+        candles: next.candles,
+        prevDayHigh: next.prevDayHigh,
+        prevDayLow: next.prevDayLow,
+        symbol: next.symbol,
       });
     }
   }
@@ -297,6 +351,50 @@ export function createPerpTicket() {
         : null,
   );
 
+  // Ghost TP/SL: only when the field is empty and not dismissed. Honest
+  // structure only — null candles / missing levels yield no ghost.
+  const ghostSl = derived(
+    [tradeStopLoss, ghostSlDismissed, tradeSide, triggerRefPrice, structure],
+    ([$sl, $dismissed, $side, $ref, $structure]): GhostValue | null => {
+      if ($dismissed || $sl.trim() !== "" || $ref === null || $ref <= 0) {
+        return null;
+      }
+      return ghostStop($structure.candles, $side, $ref, {
+        window: GHOST_DEFAULTS.swingWindow,
+        bufferPct: GHOST_DEFAULTS.stopBufferPct,
+        prevDayHigh: $structure.prevDayHigh,
+        prevDayLow: $structure.prevDayLow,
+      });
+    },
+  );
+  const ghostTp = derived(
+    [
+      tradeTakeProfit,
+      ghostTpDismissed,
+      tradeSide,
+      triggerRefPrice,
+      structure,
+      tradeStopLoss,
+    ],
+    ([$tp, $dismissed, $side, $ref, $structure, $sl]): GhostValue | null => {
+      if ($dismissed || $tp.trim() !== "" || $ref === null || $ref <= 0) {
+        return null;
+      }
+      const stop = Number($sl);
+      return ghostTakeProfit(
+        $structure.candles,
+        $side,
+        $ref,
+        Number.isFinite(stop) && stop > 0 ? stop : null,
+        {
+          window: GHOST_DEFAULTS.swingWindow,
+          rMultiple: GHOST_DEFAULTS.tpRMultiple,
+        },
+      );
+    },
+  );
+  const ghostSymbol = derived(structure, ($structure) => $structure.symbol);
+
   // Clicking a book level: prefill a limit order at that price. Side/type/
   // price only — size/TP/SL stay put.
   function prefill(price: number, side: TradeSide): void {
@@ -333,6 +431,28 @@ export function createPerpTicket() {
     );
   }
 
+  function acceptGhostTp(): boolean {
+    const ghost = get(ghostTp);
+    if (!ghost) return false;
+    tradeTakeProfit.set(fmtTriggerPrice(ghost.value));
+    return true;
+  }
+
+  function acceptGhostSl(): boolean {
+    const ghost = get(ghostSl);
+    if (!ghost) return false;
+    tradeStopLoss.set(fmtTriggerPrice(ghost.value));
+    return true;
+  }
+
+  function dismissGhostTp(): void {
+    ghostTpDismissed.set(true);
+  }
+
+  function dismissGhostSl(): void {
+    ghostSlDismissed.set(true);
+  }
+
   return {
     // fields
     tradeSide,
@@ -361,6 +481,9 @@ export function createPerpTicket() {
     slPnlUsd,
     riskNotionalUsd,
     effectiveTradeAmount,
+    ghostTp,
+    ghostSl,
+    ghostSymbol,
     // api
     setInputs,
     setNow,
@@ -368,6 +491,10 @@ export function createPerpTicket() {
     setSide,
     setTakeProfitPct,
     setStopLossPct,
+    acceptGhostTp,
+    acceptGhostSl,
+    dismissGhostTp,
+    dismissGhostSl,
   };
 }
 

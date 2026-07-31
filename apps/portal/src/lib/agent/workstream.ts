@@ -144,8 +144,20 @@ export function projectHarnessTool(
   const kind = isContext
     ? "context"
     : (normalizeKind(presentation?.kind) ?? inferKind(toolName, output));
+  const presentationStatus = text(presentation?.status);
+  const outputStatus = text(output?.status);
+  // A completed tool that already shipped a presentation envelope is done
+  // unless an explicit status says otherwise. Bare Eve lifecycle tokens
+  // (output-available) alone are never success — see normalizeStatus.
+  const statusFallback =
+    presentation &&
+    !presentationStatus &&
+    !outputStatus &&
+    source.state === "output-available"
+      ? "success"
+      : source.state;
   const status = normalizeStatus(
-    text(presentation?.status) ?? source.state,
+    presentationStatus ?? outputStatus ?? statusFallback,
     source.approvalPending === true,
   );
   const severity = text(presentation?.severity);
@@ -256,7 +268,7 @@ function normalizeStatus(
   approvalPending: boolean,
 ): WorkstreamStatus {
   if (approvalPending) return "waiting";
-  const status = (raw ?? "").toLowerCase();
+  const status = (raw ?? "").toLowerCase().trim();
   if (
     status.includes("error") ||
     status.includes("fail") ||
@@ -266,8 +278,20 @@ function normalizeStatus(
   }
   if (status.includes("denied") || status === "deny") return "denied";
   if (status.includes("pause") || status.includes("suspend")) return "paused";
+  // Tool lifecycle tokens are not outcomes — never promote them to success.
   if (
-    status.includes("output") ||
+    status === "output-available" ||
+    status === "input-available" ||
+    status === "input-streaming" ||
+    status === "pending-client" ||
+    status.includes("running") ||
+    status.includes("stream") ||
+    status.includes("signing") ||
+    status.includes("submitting")
+  ) {
+    return "running";
+  }
+  if (
     status.includes("success") ||
     status.includes("complete") ||
     status.includes("confirm") ||
@@ -276,17 +300,11 @@ function normalizeStatus(
   ) {
     return "success";
   }
-  if (
-    status.includes("input") ||
-    status.includes("running") ||
-    status.includes("stream") ||
-    status.includes("signing") ||
-    status.includes("submitting")
-  ) {
-    return "running";
-  }
   if (status.includes("approval") || status.includes("waiting")) {
     return "waiting";
+  }
+  if (status.includes("input")) {
+    return "running";
   }
   return "pending";
 }
