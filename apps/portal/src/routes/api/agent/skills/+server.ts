@@ -6,7 +6,7 @@ import {
   skillStore,
   type UserSkillSummary,
 } from "$agent/lib/skill-store";
-import { verifyPrivyAccessToken } from "$lib/server/privy";
+import { requireAgentUser } from "$lib/server/agent-api";
 import type { RequestHandler } from "./$types";
 
 const BUILTINS = BUILTIN_SKILLS.map((skill) => ({
@@ -17,20 +17,9 @@ const BUILTINS = BUILTIN_SKILLS.map((skill) => ({
   loadSkillId: skill.name,
 }));
 
-async function requireUser(request: Request): Promise<string | Response> {
-  const authorization = request.headers.get("authorization") ?? "";
-  const token = authorization.startsWith("Bearer ")
-    ? authorization.slice(7).trim()
-    : "";
-  if (!token) return json({ error: "auth-required" }, { status: 401 });
-  const userId = await verifyPrivyAccessToken(token);
-  if (!userId) return json({ error: "auth-invalid" }, { status: 401 });
-  return userId;
-}
-
 export const GET: RequestHandler = async ({ request, setHeaders }) => {
   setHeaders({ "cache-control": "no-store" });
-  const user = await requireUser(request);
+  const user = await requireAgentUser(request);
   if (user instanceof Response) return user;
 
   if (!isSkillStoreConfigured()) {
@@ -62,7 +51,7 @@ export const GET: RequestHandler = async ({ request, setHeaders }) => {
 
 export const POST: RequestHandler = async ({ request, setHeaders }) => {
   setHeaders({ "cache-control": "no-store" });
-  const user = await requireUser(request);
+  const user = await requireAgentUser(request);
   if (user instanceof Response) return user;
   if (!isSkillStoreConfigured()) {
     return json({ error: "skill-store-unconfigured" }, { status: 503 });

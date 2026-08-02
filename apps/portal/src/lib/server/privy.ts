@@ -3,7 +3,11 @@
 // users/get-all): Basic auth `app_id:app_secret` plus a `privy-app-id`
 // header. Every function fails soft — callers receive null on any failure
 // and decide policy (the eligibility endpoint fails open).
+//
+// Access-token verification is shared with Eve via `$agent/lib/privy-auth`
+// so JWKS / iss / aud / exp / nbf behavior cannot drift.
 
+import { verifyPrivyAccessToken as verifyPrivyAccessTokenShared } from "$agent/lib/privy-auth";
 import { env as privateEnv } from "$env/dynamic/private";
 import { env as publicEnv } from "$env/dynamic/public";
 
@@ -148,104 +152,20 @@ export async function getUserById(
   }
 }
 
-// ── Access-token verification ─────────────────────────────────────────
-// Privy access tokens are ES256 JWTs with iss "privy.io", aud = app id and
-// sub = the user's DID (docs.privy.io authentication/access-tokens). The
-// app's public keys are served as a JWKS at
-// https://auth.privy.io/api/v1/apps/{appId}/jwks.json (P-256, kid-keyed) —
-// verified live. Signatures check out against those keys via WebCrypto
-// (JWS ES256 signatures are raw r||s, which is exactly what WebCrypto's
-// ECDSA verify expects).
-
-const JWKS_TTL_MS = 10 * 60_000;
-type PrivyJwk = JsonWebKey & { kid?: string };
-let jwksCache: { keys: PrivyJwk[]; at: number } | null = null;
-
-/** Verify a Privy access token. Returns the user's DID (sub) or null. */
+/**
+ * Verify a Privy access token. Shared with Eve (`$agent/lib/privy-auth`)
+ * so JWKS / iss / aud / exp / nbf behavior cannot drift.
+ */
 export async function verifyPrivyAccessToken(
   token: string,
 ): Promise<string | null> {
-  const appId = readAppId();
-  if (!appId) return null;
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
-    const [headerB64, payloadB64, signatureB64] = parts;
-
-    const header = JSON.parse(
-      Buffer.from(headerB64, "base64url").toString("utf8"),
-    ) as { alg?: unknown; kid?: unknown };
-    if (header.alg !== "ES256") return null;
-
-    const payload = JSON.parse(
-      Buffer.from(payloadB64, "base64url").toString("utf8"),
-    ) as { iss?: unknown; aud?: unknown; exp?: unknown; sub?: unknown };
-    if (payload.iss !== "privy.io") return null;
-    const audOk = Array.isArray(payload.aud)
-      ? payload.aud.includes(appId)
-      : payload.aud === appId;
-    if (!audOk) return null;
-    if (typeof payload.exp !== "number" || payload.exp * 1000 <= Date.now()) {
-      return null;
-    }
-    if (typeof payload.sub !== "string" || !payload.sub) return null;
-
-    const keys = await fetchJwks(appId);
-    if (!keys || keys.length === 0) return null;
-    // Prefer the kid match; fall back to trying every key so a rotation
-    // between our cache refreshes cannot reject a valid token.
-    const kid = typeof header.kid === "string" ? header.kid : null;
-    const candidates = kid
-      ? [
-          ...keys.filter((key) => key.kid === kid),
-          ...keys.filter((key) => key.kid !== kid),
-        ]
-      : keys;
-
-    const signature = Buffer.from(signatureB64, "base64url");
-    const message = Buffer.from(`${headerB64}.${payloadB64}`);
-    for (const jwk of candidates) {
-      const key = await crypto.subtle.importKey(
-        "jwk",
-        jwk,
-        { name: "ECDSA", namedCurve: "P-256" },
-        false,
-        ["verify"],
-      );
-      const valid = await crypto.subtle.verify(
-        { name: "ECDSA", hash: "SHA-256" },
-        key,
-        signature,
-        message,
-      );
-      if (valid) return payload.sub;
-    }
-    return null;
-  } catch {
-    return null;
+  // Ensure PUBLIC_PRIVY_APP_ID from SvelteKit env is visible to the shared
+  // verifier (Eve reads process.env directly).
+  if (!process.env.PUBLIC_PRIVY_APP_ID?.trim()) {
+    const fromKit = cleanEnv(publicEnv.PUBLIC_PRIVY_APP_ID);
+    if (fromKit) process.env.PUBLIC_PRIVY_APP_ID = fromKit;
   }
-}
-
-async function fetchJwks(appId: string): Promise<PrivyJwk[] | null> {
-  const cached = jwksCache;
-  if (cached && Date.now() - cached.at < JWKS_TTL_MS) return cached.keys;
-  try {
-    const response = await fetch(
-      `https://auth.privy.io/api/v1/apps/${encodeURIComponent(appId)}/jwks.json`,
-    );
-    if (!response.ok) return cached ? cached.keys : null;
-    const data = (await response.json()) as { keys?: unknown };
-    const keys = Array.isArray(data.keys)
-      ? (data.keys.filter(
-          (key) => typeof key === "object" && key !== null,
-        ) as PrivyJwk[])
-      : [];
-    if (keys.length === 0) return cached ? cached.keys : null;
-    jwksCache = { keys, at: Date.now() };
-    return keys;
-  } catch {
-    return cached ? cached.keys : null; // stale-on-error
-  }
+  return verifyPrivyAccessTokenShared(token);
 }
 
 function readCredentials(): PrivyCredentials | null {

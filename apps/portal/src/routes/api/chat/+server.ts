@@ -110,6 +110,17 @@ export const POST: RequestHandler = async ({ request, fetch, setHeaders }) => {
   const body = await readChatBody(request);
   if (!body) return json({ error: "bad-request" }, { status: 400 });
 
+  // Edge credentials must be the verified session token (or another Privy
+  // token for the same sub). Never forward a mismatched body edgeToken.
+  let edgeToken = token;
+  if (body.edgeToken && body.edgeToken !== token) {
+    const edgeUser = await verifyPrivyAccessToken(body.edgeToken);
+    if (!edgeUser || edgeUser !== userId) {
+      return json({ error: "edge-token-mismatch" }, { status: 403 });
+    }
+    edgeToken = body.edgeToken;
+  }
+
   const history = capHistory(body.history);
   const contextJson = JSON.stringify(body.context);
   if (typeof contextJson !== "string") {
@@ -142,7 +153,7 @@ export const POST: RequestHandler = async ({ request, fetch, setHeaders }) => {
   const generated = await generateReply({
     context: body.context,
     edgeFetch: fetch,
-    edgeToken: body.edgeToken,
+    edgeToken,
     history,
     nowMs,
     resolvedModel,

@@ -22,8 +22,15 @@ function parseMode(value: unknown): AgentMode {
   return value === "observe" || value === "auto" ? value : "ask";
 }
 
-function parseAccountMode(value: unknown): AccountMode {
-  return value === "live" ? "live" : "paper";
+/** Exported for unit tests — live requires the server-stamped liveAccess flag. */
+export function parseAccountMode(
+  value: unknown,
+  liveAccess: unknown,
+): AccountMode {
+  if (value !== "live") return "paper";
+  // Defense in depth: even if a stale attribute says live, require the
+  // server-stamped liveAccess flag from Eve auth.
+  return liveAccess === true || liveAccess === "true" ? "live" : "paper";
 }
 
 export function requireAgentPrincipal(ctx: EveContext): AgentPrincipal {
@@ -42,7 +49,7 @@ export function requireAgentPrincipal(ctx: EveContext): AgentPrincipal {
   return {
     userId: current.principalId,
     agentMode: parseMode(attrs.agentMode),
-    accountMode: parseAccountMode(attrs.accountMode),
+    accountMode: parseAccountMode(attrs.accountMode, attrs.liveAccess),
     paused: attrs.paused === true || attrs.paused === "true",
   };
 }

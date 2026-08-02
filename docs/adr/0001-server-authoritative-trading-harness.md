@@ -59,10 +59,20 @@ Execution, even when navigation and trading appear in the same user request.
 - The server resolves the user's wallet and signer capability from that
   principal. Wallet identifiers are never accepted from model tool input or
   browser context.
-- Privy is the WalletAdapter. Private keys and seed phrases are neither stored
-  by Harness nor exposed to the model, browser, EVE durable state, or logs.
-- The user explicitly enables delegated server signing and can revoke it.
-  Signing capability is not a Mandate; both signer capability and policy
+- Current implementation: live agent wallets are **server-custody** keys
+  derived from `AGENT_WALLET_MASTER_SECRET` + Privy principal (see
+  `agent/lib/server-wallet.ts`). Privy authenticates the user and provides
+  the browser embedded wallet for manual terminal signing; it is not the
+  live agent signer today. Target evolution may move to Privy delegated
+  signing — until then, document and rotate the master secret as a
+  production secret.
+- Private keys and seed phrases are never exposed to the model, browser,
+  EVE durable state, or logs.
+- Live agent execution additionally requires an explicit server-side live
+  access enablement record (`agent/lib/live-access-store.ts`). Client
+  `x-harness-account-mode: live` alone is not sufficient; without the
+  record the session is clamped to paper.
+- Signing capability is not a Mandate; both signer capability and policy
   authority must be valid.
 - The server constructs transactions from canonical domain operations and
   allowlisted venue adapters. The model cannot supply transaction bytes, fee
