@@ -177,6 +177,7 @@
     unregisterAgentHost,
     type AgentActionResult,
   } from "$lib/agent/host";
+  import { setLiveAgentAccess } from "$lib/agent/live-access-api";
   import { agentState } from "$lib/agent/state";
   import { fetchMintSafety, fetchSolanaLamports, solanaRpcUrl } from "$lib/solana-rpc";
   import { swrRead, swrWrite } from "$lib/swr";
@@ -3377,7 +3378,7 @@
     applyPaperMids();
   }
 
-  function togglePaperMode(): void {
+  async function togglePaperMode(): Promise<void> {
     if (liveSignerInFlight) {
       phoenixActionError =
         "Wallet signing is already in progress — finish or reject it before switching PAPER/LIVE.";
@@ -3390,7 +3391,33 @@
       });
       return;
     }
-    paperMode = !paperMode;
+    const nextPaper = !paperMode;
+    if (!nextPaper) {
+      // Live agent execution requires an explicit server-side enablement.
+      // Terminal LIVE mode still works for manual tickets; the agent stays
+      // on paper until this ack succeeds.
+      try {
+        await setLiveAgentAccess(true);
+      } catch (error) {
+        alertsStore.pushToast({
+          ts: Date.now(),
+          title: "Live agent not enabled",
+          body:
+            error instanceof Error
+              ? error.message
+              : "Could not enable live agent access. Staying on PAPER for agent trades.",
+        });
+        // Still allow UI live for manual trading; agent will clamp to paper
+        // until the vault ack exists.
+      }
+    } else {
+      try {
+        await setLiveAgentAccess(false);
+      } catch {
+        // Best-effort revoke; UI paper mode still applies.
+      }
+    }
+    paperMode = nextPaper;
     if (paperMode) enterPaperSafetyBoundary();
     else exitPaperSafetyBoundary();
     track("paper_mode_toggled", { paperMode });

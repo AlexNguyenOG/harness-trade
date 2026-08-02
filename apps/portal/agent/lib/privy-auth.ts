@@ -1,3 +1,7 @@
+// Canonical Privy access-token verification for Eve and SvelteKit.
+// ES256 JWTs: iss privy.io, aud = app id, sub = user DID.
+// JWKS: https://auth.privy.io/api/v1/apps/{appId}/jwks.json
+
 const PRIVY_ISSUER = "privy.io";
 const JWKS_TTL_MS = 10 * 60_000;
 
@@ -10,7 +14,10 @@ function appId(): string {
       process.env.NEXT_PUBLIC_PRIVY_APP_ID ??
       process.env.VITE_PRIVY_APP_ID ??
       "",
-  ).trim();
+  )
+    .trim()
+    .replace(/^"+|"+$/g, "")
+    .replace(/\\n$/, "");
 }
 
 function decodeJson(value: string): Record<string, unknown> {
@@ -20,28 +27,32 @@ function decodeJson(value: string): Record<string, unknown> {
   >;
 }
 
-async function fetchJwks(id: string): Promise<PrivyJwk[]> {
-  if (jwksCache && Date.now() - jwksCache.at < JWKS_TTL_MS) {
-    return jwksCache.keys;
+async function fetchJwks(id: string): Promise<PrivyJwk[] | null> {
+  const cached = jwksCache;
+  if (cached && Date.now() - cached.at < JWKS_TTL_MS) return cached.keys;
+  try {
+    const response = await fetch(
+      `https://auth.privy.io/api/v1/apps/${encodeURIComponent(id)}/jwks.json`,
+    );
+    if (!response.ok) return cached ? cached.keys : null;
+    const payload = (await response.json()) as { keys?: unknown };
+    const keys = Array.isArray(payload.keys)
+      ? (payload.keys.filter(
+          (key) => typeof key === "object" && key !== null,
+        ) as PrivyJwk[])
+      : [];
+    if (keys.length === 0) return cached ? cached.keys : null;
+    jwksCache = { keys, at: Date.now() };
+    return keys;
+  } catch {
+    return cached ? cached.keys : null;
   }
-  const response = await fetch(
-    `https://auth.privy.io/api/v1/apps/${encodeURIComponent(id)}/jwks.json`,
-  );
-  if (!response.ok) throw new Error("privy-jwks-unavailable");
-  const payload = (await response.json()) as { keys?: unknown };
-  const keys = Array.isArray(payload.keys)
-    ? (payload.keys.filter(
-        (key) => typeof key === "object" && key !== null,
-      ) as PrivyJwk[])
-    : [];
-  if (keys.length === 0) throw new Error("privy-jwks-empty");
-  jwksCache = { keys, at: Date.now() };
-  return keys;
 }
 
+/** Verify a Privy access token. Returns the user's DID (sub) or null. */
 export async function verifyPrivyToken(token: string): Promise<string | null> {
   const id = appId();
-  if (!id) return null;
+  if (!id || !token.trim()) return null;
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
@@ -58,16 +69,24 @@ export async function verifyPrivyToken(token: string): Promise<string | null> {
     if (
       typeof payload.exp !== "number" ||
       payload.exp * 1_000 <= Date.now() ||
-      typeof payload.sub !== "string"
+      typeof payload.sub !== "string" ||
+      !payload.sub
     ) {
       return null;
     }
+    // Optional nbf: reject tokens that are not yet valid.
+    if (typeof payload.nbf === "number" && payload.nbf * 1_000 > Date.now()) {
+      return null;
+    }
     const keys = await fetchJwks(id);
+    if (!keys || keys.length === 0) return null;
     const kid = typeof header.kid === "string" ? header.kid : "";
-    const candidates = [
-      ...keys.filter((key) => key.kid === kid),
-      ...keys.filter((key) => key.kid !== kid),
-    ];
+    const candidates = kid
+      ? [
+          ...keys.filter((key) => key.kid === kid),
+          ...keys.filter((key) => key.kid !== kid),
+        ]
+      : keys;
     const signature = Buffer.from(signatureB64, "base64url");
     const message = Buffer.from(`${headerB64}.${payloadB64}`);
     for (const jwk of candidates) {
@@ -94,3 +113,6 @@ export async function verifyPrivyToken(token: string): Promise<string | null> {
     return null;
   }
 }
+
+/** Alias used by SvelteKit routes — same verifier as Eve. */
+export const verifyPrivyAccessToken = verifyPrivyToken;

@@ -4,6 +4,7 @@ import {
   withAuthChallenges,
 } from "eve/channels/auth";
 import { eveChannel } from "eve/channels/eve";
+import { isLiveAgentEnabled } from "../lib/live-access-store";
 import { verifyPrivyToken } from "../lib/privy-auth";
 
 function requestMode(
@@ -35,6 +36,19 @@ const privyAuth: AuthFn<Request> = withAuthChallenges(
         message: "The Privy session is invalid or expired.",
       });
     }
+
+    const requestedAccount = requestMode(
+      request,
+      "x-harness-account-mode",
+      ["paper", "live"],
+      "paper",
+    );
+    // Live is never taken from the client header alone — require a durable
+    // server-side enablement record (fail closed to paper).
+    const liveEnabled =
+      requestedAccount === "live" ? await isLiveAgentEnabled(userId) : false;
+    const accountMode = liveEnabled ? "live" : "paper";
+
     return {
       authenticator: "privy",
       issuer: "privy.io",
@@ -48,12 +62,8 @@ const privyAuth: AuthFn<Request> = withAuthChallenges(
           ["observe", "ask", "auto"],
           "ask",
         ),
-        accountMode: requestMode(
-          request,
-          "x-harness-account-mode",
-          ["paper", "live"],
-          "paper",
-        ),
+        accountMode,
+        liveAccess: liveEnabled ? "true" : "false",
         paused:
           request.headers.get("x-harness-agent-paused") === "true"
             ? "true"
