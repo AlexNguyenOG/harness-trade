@@ -453,11 +453,15 @@
   .mode-toggle {
     position: relative;
     display: inline-grid;
-    grid-template-columns: 3.4rem 3.4rem;
+    grid-template-columns: 1fr 1fr;
+    min-width: 8.6rem;
+    height: 2.2rem;
+    min-height: 2.2rem;
     border: 1px solid var(--line);
     border-radius: 0;
     isolation: isolate;
     flex-shrink: 0;
+    box-sizing: border-box;
   }
 
   .mode-pill {
@@ -483,10 +487,12 @@
     border: 0;
     color: var(--muted);
     font: inherit;
-    font-size: 0.68rem;
+    font-size: 0.75rem;
     font-weight: 700;
     letter-spacing: 0.04em;
-    padding: 0.35rem 0;
+    min-height: 2.2rem;
+    height: 100%;
+    padding: 0 0.65rem;
     cursor: pointer;
     transition: color 180ms ease;
   }
