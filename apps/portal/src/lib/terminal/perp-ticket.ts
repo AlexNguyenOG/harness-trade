@@ -11,9 +11,9 @@
 // must never import web3.js or issue network calls.
 import { derived, get, writable } from "svelte/store";
 import type { JournalEntry } from "$lib/journal";
-import type { ClosedTradeReview } from "$lib/postmortem";
-import { ghostRisk, type GhostRisk } from "$lib/postmortem";
 import type { DepthLevel, MarketPoint } from "$lib/phoenix-market-data";
+import type { ClosedTradeReview } from "$lib/postmortem";
+import { type GhostRisk, ghostRisk } from "$lib/postmortem";
 import {
   GHOST_DEFAULTS,
   type GhostSizing,
