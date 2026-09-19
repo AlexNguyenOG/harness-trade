@@ -2,6 +2,7 @@
   import type { DepthLevel } from "$lib/phoenix-market-data";
   import { bookLevelNotional, formatBookPrice } from "$lib/terminal/book";
   import {
+    formatGhostRiskLabel,
     formatGhostSizeLabel,
     snapTicketLeverage,
     type PerpTicket,
@@ -169,15 +170,18 @@
     ghostTp,
     ghostSl,
     ghostSize,
+    ghostRisk,
     ghostSymbol,
     setTakeProfitPct,
     setStopLossPct,
     acceptGhostTp,
     acceptGhostSl,
     acceptGhostSize,
+    acceptGhostRisk,
     dismissGhostTp,
     dismissGhostSl,
     dismissGhostSize,
+    dismissGhostRisk,
   } = ticket;
 
   function applyOrderTemplate(template: OrderTemplate): void {
@@ -321,6 +325,32 @@
     }
   }
 
+  function onRiskKeydown(event: KeyboardEvent): void {
+    if (event.key === "Tab" && !event.shiftKey && $ghostRisk) {
+      event.preventDefault();
+      const symbol = $ghostSymbol;
+      if (acceptGhostRisk()) {
+        track("ghost_accepted", {
+          field: "risk",
+          source: "postmortem",
+          symbol,
+        });
+      }
+      return;
+    }
+    if (event.key === "Escape" && $ghostRisk) {
+      event.preventDefault();
+      event.stopPropagation();
+      const symbol = $ghostSymbol;
+      dismissGhostRisk();
+      track("ghost_dismissed", {
+        field: "risk",
+        source: "postmortem",
+        symbol,
+      });
+    }
+  }
+
   // ── Size presets ───────────────────────────────────────────────────
   // USD mode: % of free collateral × leverage; Max keeps the same $0.01
   // margin buffer the funding gate tolerates so a Max ticket can't flash
@@ -369,14 +399,37 @@
           {/if}
         </span>
       {:else}
-        <input
-          bind:this={sizeInput}
-          bind:value={$tradeRiskUsd}
-          inputmode="decimal"
-          placeholder="25"
-          use:stepInput={{ kind: "usd" }}
-          oninput={() => onmanualsize()}
-        />
+        <div class="risk-input-row">
+          <span class="ghost-input">
+            <input
+              bind:this={sizeInput}
+              bind:value={$tradeRiskUsd}
+              inputmode="decimal"
+              placeholder="25"
+              use:stepInput={{ kind: "usd" }}
+              oninput={() => onmanualsize()}
+              onkeydown={onRiskKeydown}
+            />
+            {#if $ghostRisk}
+              <span
+                class="ghost-overlay"
+                aria-hidden="true"
+                title={$ghostRisk.provenance}
+              >{formatGhostRiskLabel($ghostRisk)}</span>
+            {/if}
+          </span>
+          <span
+            class="risk-size-inline"
+            class:muted={$riskNotionalUsd === null}
+            title="Derived notional from risk and stop distance"
+          >
+            {#if $riskNotionalUsd !== null}
+              → {money($riskNotionalUsd, 2)}
+            {:else}
+              → set stop
+            {/if}
+          </span>
+        </div>
       {/if}
     </label>
     {#if $sizingMode === "usd"}
@@ -574,12 +627,6 @@
 {/if}
 
 <div class="ticket-preview">
-  {#if $sizingMode === "risk"}
-    <div class="preview-row">
-      <span>Size from stop</span>
-      <b>{$riskNotionalUsd !== null ? money($riskNotionalUsd, 2) : "set a stop loss"}</b>
-    </div>
-  {/if}
   <div class="preview-row"><span>Est. entry</span><b>{formatPrice($tradePreview?.entry)}</b></div>
   <div class="preview-row">
     <span>Slippage</span>
@@ -786,6 +833,28 @@
   .ghost-input {
     position: relative;
     display: block;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .risk-input-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .risk-size-inline {
+    flex-shrink: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .risk-size-inline.muted {
+    color: var(--faint);
+    font-weight: 600;
   }
 
   .ghost-overlay {
