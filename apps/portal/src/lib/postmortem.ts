@@ -51,6 +51,53 @@ export function riskUsd(input: {
   return Number.isFinite(risk) && risk > 0 ? risk : null;
 }
 
+export type GhostRisk = {
+  riskUsd: number;
+  provenance: string;
+  sampleSize: number;
+};
+
+/** Median risk-$ from the user's own closed perp reviews for `symbol`
+ * (entry+stop+notional required). Null below minSample — same honesty bar
+ * as size ghosts. */
+export function ghostRisk(
+  reviews: ClosedTradeReview[],
+  symbol: string,
+  minSample: number,
+): GhostRisk | null {
+  const risks: number[] = [];
+  for (const row of reviews) {
+    if (row.venue !== "perp" || row.symbol !== symbol) continue;
+    if (
+      row.entryPrice === null ||
+      row.stopLossPrice === null ||
+      row.notionalUsd === null
+    ) {
+      continue;
+    }
+    const value = riskUsd({
+      side: row.side,
+      entryPrice: row.entryPrice,
+      stopLossPrice: row.stopLossPrice,
+      notionalUsd: row.notionalUsd,
+    });
+    if (value !== null) risks.push(value);
+  }
+  const sampleSize = risks.length;
+  if (sampleSize < Math.max(1, minSample)) return null;
+
+  const sorted = [...risks].sort((a, b) => a - b);
+  const mid = Math.floor(sampleSize / 2);
+  const riskUsdMedian =
+    sampleSize % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+
+  return {
+    riskUsd: riskUsdMedian,
+    provenance: `median risk of your last ${sampleSize} ${symbol} closes`,
+    sampleSize,
+  };
+}
+
 export function rMultiple(input: {
   side: PostMortemSide;
   entryPrice: number | null;

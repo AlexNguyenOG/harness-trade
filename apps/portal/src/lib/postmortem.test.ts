@@ -3,6 +3,7 @@ import {
   buildClosedTradeReview,
   clearPostMortems,
   formatRMultiple,
+  ghostRisk,
   greenDayStreak,
   loadPostMortems,
   recordPostMortem,
@@ -231,5 +232,77 @@ describe("greenDayStreak", () => {
       }),
     ];
     expect(greenDayStreak(rows, now, "live")).toBe(2);
+  });
+});
+
+describe("ghostRisk", () => {
+  test("median risk from closed reviews with stops", () => {
+    // long 100→95 on $500 = $25 risk; long 100→90 on $400 = $40; long 100→95 on $600 = $30
+    const rows = [
+      buildClosedTradeReview({
+        ts: 1,
+        mode: "paper",
+        symbol: "SOL",
+        side: "long",
+        entryPrice: 100,
+        exitPrice: 110,
+        stopLossPrice: 95,
+        notionalUsd: 500,
+        realizedPnlUsd: 50,
+        exitReason: "tp",
+        signature: "a",
+      }),
+      buildClosedTradeReview({
+        ts: 2,
+        mode: "paper",
+        symbol: "SOL",
+        side: "long",
+        entryPrice: 100,
+        exitPrice: 110,
+        stopLossPrice: 90,
+        notionalUsd: 400,
+        realizedPnlUsd: 40,
+        exitReason: "tp",
+        signature: "b",
+      }),
+      buildClosedTradeReview({
+        ts: 3,
+        mode: "paper",
+        symbol: "SOL",
+        side: "long",
+        entryPrice: 100,
+        exitPrice: 110,
+        stopLossPrice: 95,
+        notionalUsd: 600,
+        realizedPnlUsd: 60,
+        exitReason: "tp",
+        signature: "c",
+      }),
+    ];
+    expect(ghostRisk(rows, "SOL", 3)).toEqual({
+      riskUsd: 30,
+      provenance: "median risk of your last 3 SOL closes",
+      sampleSize: 3,
+    });
+  });
+
+  test("null below minSample or without stop", () => {
+    const rows = [
+      buildClosedTradeReview({
+        ts: 1,
+        mode: "paper",
+        symbol: "SOL",
+        side: "long",
+        entryPrice: 100,
+        exitPrice: 110,
+        stopLossPrice: null,
+        notionalUsd: 500,
+        realizedPnlUsd: 50,
+        exitReason: "manual",
+        signature: "a",
+      }),
+    ];
+    expect(ghostRisk(rows, "SOL", 1)).toBeNull();
+    expect(ghostRisk([], "SOL", 3)).toBeNull();
   });
 });

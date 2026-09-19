@@ -36,6 +36,7 @@ function inputs(overrides: Partial<PerpTicketInputs> = {}): PerpTicketInputs {
     prevDayLow: null,
     symbol: "SOL",
     journalEntries: [],
+    closedTradeReviews: [],
     ...overrides,
   };
 }

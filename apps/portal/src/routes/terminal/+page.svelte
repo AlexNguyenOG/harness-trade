@@ -1351,6 +1351,7 @@
     prevDayLow: tradeMode === "perps" ? structLevels.prevDayLow : null,
     symbol: selectedSymbol,
     journalEntries,
+    closedTradeReviews: postMortems,
   });
   $: perpTicket.setNow(nowMs);
 

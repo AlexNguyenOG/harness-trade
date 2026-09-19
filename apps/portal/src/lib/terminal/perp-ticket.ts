@@ -11,6 +11,8 @@
 // must never import web3.js or issue network calls.
 import { derived, get, writable } from "svelte/store";
 import type { JournalEntry } from "$lib/journal";
+import type { ClosedTradeReview } from "$lib/postmortem";
+import { ghostRisk, type GhostRisk } from "$lib/postmortem";
 import type { DepthLevel, MarketPoint } from "$lib/phoenix-market-data";
 import {
   GHOST_DEFAULTS,
@@ -54,6 +56,8 @@ export type PerpTicketInputs = {
   symbol: string;
   /** Local journal — size/leverage ghosts; page-injected, never loadJournal here. */
   journalEntries: JournalEntry[];
+  /** Closed-trade reviews — risk ghosts; page-injected, never loadPostMortems here. */
+  closedTradeReviews: ClosedTradeReview[];
 };
 
 type MarketInputs = Pick<
@@ -70,7 +74,12 @@ type AccountInputs = Pick<
 >;
 type StructureInputs = Pick<
   PerpTicketInputs,
-  "candles" | "prevDayHigh" | "prevDayLow" | "symbol" | "journalEntries"
+  | "candles"
+  | "prevDayHigh"
+  | "prevDayLow"
+  | "symbol"
+  | "journalEntries"
+  | "closedTradeReviews"
 >;
 
 const TICKET_LEVERAGES = [1, 2, 5, 10, 20] as const;
@@ -90,6 +99,14 @@ export function formatGhostSizeLabel(ghost: GhostSizing): string {
       ? Math.round(ghost.notionalUsd)
       : Math.round(ghost.notionalUsd * 100) / 100;
   return `$${notional} @ ${snapTicketLeverage(ghost.leverage)}x`;
+}
+
+export function formatGhostRiskLabel(ghost: GhostRisk): string {
+  const risk =
+    ghost.riskUsd >= 10
+      ? Math.round(ghost.riskUsd)
+      : Math.round(ghost.riskUsd * 100) / 100;
+  return `$${risk} risk`;
 }
 
 export function createPerpTicket() {
@@ -134,16 +151,19 @@ export function createPerpTicket() {
     prevDayLow: null,
     symbol: "",
     journalEntries: [],
+    closedTradeReviews: [],
   });
   const now = writable(0);
   const ghostTpDismissed = writable(false);
   const ghostSlDismissed = writable(false);
   const ghostSizeDismissed = writable(false);
+  const ghostRiskDismissed = writable(false);
 
   function clearGhostDismissed(): void {
     ghostTpDismissed.set(false);
     ghostSlDismissed.set(false);
     ghostSizeDismissed.set(false);
+    ghostRiskDismissed.set(false);
   }
 
   // Side flips via bind ($tradeSide = …) bypass setSide — subscribe so
@@ -207,7 +227,8 @@ export function createPerpTicket() {
       prev.prevDayHigh !== next.prevDayHigh ||
       prev.prevDayLow !== next.prevDayLow ||
       prev.symbol !== next.symbol ||
-      prev.journalEntries !== next.journalEntries
+      prev.journalEntries !== next.journalEntries ||
+      prev.closedTradeReviews !== next.closedTradeReviews
     ) {
       if (prev && prev.symbol !== next.symbol) {
         clearGhostDismissed();
@@ -218,6 +239,7 @@ export function createPerpTicket() {
         prevDayLow: next.prevDayLow,
         symbol: next.symbol,
         journalEntries: next.journalEntries,
+        closedTradeReviews: next.closedTradeReviews,
       });
     }
   }
@@ -437,6 +459,19 @@ export function createPerpTicket() {
     },
   );
 
+  // Ghost risk-$ from closed reviews — risk mode only, empty field, ≥5 samples.
+  const ghostRiskValue = derived(
+    [sizingMode, tradeRiskUsd, ghostRiskDismissed, structure],
+    ([$mode, $risk, $dismissed, $structure]): GhostRisk | null => {
+      if ($dismissed || $mode !== "risk" || $risk.trim() !== "") return null;
+      return ghostRisk(
+        $structure.closedTradeReviews,
+        $structure.symbol,
+        GHOST_DEFAULTS.sizingMinSample,
+      );
+    },
+  );
+
   // Clicking a book level: prefill a limit order at that price. Side/type/
   // price only — size/TP/SL stay put.
   function prefill(price: number, side: TradeSide): void {
@@ -499,6 +534,17 @@ export function createPerpTicket() {
     return true;
   }
 
+  function acceptGhostRisk(): boolean {
+    const ghost = get(ghostRiskValue);
+    if (!ghost) return false;
+    const risk =
+      ghost.riskUsd >= 10
+        ? Math.round(ghost.riskUsd)
+        : Math.round(ghost.riskUsd * 100) / 100;
+    tradeRiskUsd.set(String(risk));
+    return true;
+  }
+
   function dismissGhostTp(): void {
     ghostTpDismissed.set(true);
   }
@@ -509,6 +555,10 @@ export function createPerpTicket() {
 
   function dismissGhostSize(): void {
     ghostSizeDismissed.set(true);
+  }
+
+  function dismissGhostRisk(): void {
+    ghostRiskDismissed.set(true);
   }
 
   return {
@@ -542,6 +592,7 @@ export function createPerpTicket() {
     ghostTp,
     ghostSl,
     ghostSize,
+    ghostRisk: ghostRiskValue,
     ghostSymbol,
     // api
     setInputs,
@@ -553,9 +604,11 @@ export function createPerpTicket() {
     acceptGhostTp,
     acceptGhostSl,
     acceptGhostSize,
+    acceptGhostRisk,
     dismissGhostTp,
     dismissGhostSl,
     dismissGhostSize,
+    dismissGhostRisk,
   };
 }
 
